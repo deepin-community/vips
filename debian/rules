@@ -1,0 +1,52 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+# Enable all hardening options.
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/buildflags.mk
+
+ifneq (, $(filter kfreebsd%, $(DEB_HOST_ARCH_OS)))
+CONFIGURE_EXTRA_FLAGS += --without-v4l
+endif
+
+ifneq (, $(filter ppc64el, $(DEB_HOST_ARCH)))
+CONFIGURE_EXTRA_FLAGS += --without-orc
+endif
+
+PYTHON3_VERSIONS = $(shell py3versions -r)
+
+DESTDIR = $(CURDIR)/debian/tmp
+
+override_dh_autoreconf:
+	gtkdocize --copy --docdir doc --flavour no-tmpl
+	glib-gettextize --force --copy > /dev/null
+	dh_autoreconf
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+			   --enable-gtk-doc \
+			   $(CONFIGURE_EXTRA_FLAGS)
+
+override_dh_auto_test:
+ifeq (, $(filter s390x, $(DEB_HOST_ARCH)))
+	dh_auto_test
+else
+	dh_auto_test || true
+endif
+
+override_dh_auto_install:
+	dh_auto_install
+	mv $(DESTDIR)/usr/share/doc/vips/ \
+		$(DESTDIR)/usr/share/doc/libvips-doc
+	perl $(CURDIR)/debian/scripts/create_missing_manual_pages
+	sed -i 's/python/python3/' $(DESTDIR)/usr/bin/vipsprofile
+
+%:
+	dh $@ --with gir
+
+.PHONY: override_dh_autoreconf override_dh_auto_configure \
+	override_dh_auto_test override_dh_auto_install
