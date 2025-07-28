@@ -1,3 +1,9 @@
+vips (8.16.1-1deepin1) unstable; urgency=medium
+
+  * revert t64.
+
+ -- lhdjply <lhdjply@126.com>  Mon, 28 Jul 2025 08:25:48 +0800
+
 vips (8.16.1-1) unstable; urgency=medium
 
   * New upstream release.
