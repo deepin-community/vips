@@ -1,7 +1,7 @@
-# libvips : an image processing library
+# libvips: an image processing library
 
 [![CI](https://github.com/libvips/libvips/workflows/CI/badge.svg)](https://github.com/libvips/libvips/actions)
-[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/libvips.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=2&q=proj:libvips)
+[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/libvips.svg)](https://issues.oss-fuzz.com/issues?q=is:open%20project:libvips)
 [![Coverity Status](https://scan.coverity.com/projects/6503/badge.svg)](https://scan.coverity.com/projects/jcupitt-libvips)
 [![Gitter](https://badges.gitter.im/libvips/devchat.svg)](https://gitter.im/libvips/devchat?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
@@ -12,8 +12,8 @@ threaded](https://github.com/libvips/libvips/wiki/Why-is-libvips-quick)
 image processing library. Compared to similar
 libraries, [libvips runs quickly and uses little
 memory](https://github.com/libvips/libvips/wiki/Speed-and-memory-use).
-libvips is licensed under the [LGPL
-2.1+](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html).
+libvips is licensed under the [LGPL-2.1-or-later](
+https://spdx.org/licenses/LGPL-2.1-or-later).
 
 It has around [300
 operations](https://libvips.github.io/libvips/API/current/func-list.html)
@@ -22,7 +22,7 @@ operations, frequency filtering, colour, resampling,
 statistics and others. It supports a large range of [numeric
 types](https://libvips.github.io/libvips/API/current/VipsImage.html#VipsBandFormat),
 from 8-bit int to 128-bit complex. Images can have any number of bands.
-It supports a good range of image formats, including JPEG, JPEG2000, JPEG-XL,
+It supports a good range of image formats, including JPEG, JPEG 2000, JPEG XL,
 TIFF, PNG, WebP, HEIC, AVIF, FITS, Matlab, OpenEXR, PDF, SVG, HDR, PPM / PGM /
 PFM, CSV, GIF, Analyze, NIfTI, DeepZoom, and OpenSlide. It can also load
 images via ImageMagick or GraphicsMagick, letting it work with formats
@@ -30,25 +30,40 @@ like DICOM.
 
 It comes with bindings for
 [C](https://libvips.github.io/libvips/API/current/using-from-c.html),
-[C++](https://libvips.github.io/libvips/API/current/using-from-cpp.html),
+[C++](https://libvips.github.io/libvips/API/current/libvips-from-C++.html),
 and the
 [command-line](https://libvips.github.io/libvips/API/current/using-cli.html).
-Full bindings are available for [Ruby](https://rubygems.org/gems/ruby-vips),
-[Python](https://pypi.python.org/pypi/pyvips),
-[PHP](https://github.com/libvips/php-vips),
-[C# / .NET](https://www.nuget.org/packages/NetVips),
-[Go](https://github.com/davidbyttow/govips), and
-[Lua](https://github.com/libvips/lua-vips). libvips
-is used as an image processing engine by [sharp
-(on node.js)](https://www.npmjs.org/package/sharp),
-[bimg](https://github.com/h2non/bimg), [sharp
-for Go](https://github.com/DAddYE/vips), [Ruby on
-Rails](https://edgeguides.rubyonrails.org/active_storage_overview.html),
-[carrierwave-vips](https://github.com/eltiare/carrierwave-vips),
-[mediawiki](https://www.mediawiki.org/wiki/Extension:VipsScaler),
-[PhotoFlow](https://github.com/aferrero2707/PhotoFlow) and others.
-The official libvips GUI is [nip2](https://github.com/libvips/nip2),
-a strange combination of a spreadsheet and a photo editor.
+Full bindings are available for :
+
+| Language | Binding |
+|---|---|
+| Ruby | [ruby-vips](https://rubygems.org/gems/ruby-vips) |
+| Python | [pyvips](https://pypi.python.org/pypi/pyvips) |
+| PHP | [php-vips](https://github.com/libvips/php-vips) |
+| C# / .NET | [NetVips](https://www.nuget.org/packages/NetVips) |
+| Go | [govips](https://github.com/davidbyttow/govips) |
+| Lua | [lua-vips](https://github.com/libvips/lua-vips) |
+| Crystal | [crystal-vips](https://github.com/naqvis/crystal-vips) |
+| Elixir | [vix](https://github.com/akash-akya/vix) |
+| JVM | [vips-ffm](https://github.com/lopcode/vips-ffm) |
+
+libvips is used as an image processing engine by:
+
+| |
+|---|
+| [sharp (on node.js)](https://www.npmjs.org/package/sharp) |
+| [imgproxy](https://github.com/imgproxy/imgproxy) |
+| [bimg](https://github.com/h2non/bimg) |
+| [sharp for Go](https://github.com/DAddYE/vips) |
+| [Ruby on Rails](https://edgeguides.rubyonrails.org/active_storage_overview.html) |
+| [carrierwave-vips](https://github.com/eltiare/carrierwave-vips) |
+| [mediawiki](https://www.mediawiki.org/wiki/Extension:VipsScaler) |
+| [PhotoFlow](https://github.com/aferrero2707/PhotoFlow) |
+| [JVips](https://github.com/criteo/JVips) |
+
+and others. The official libvips GUI is
+[nip2](https://github.com/libvips/nip2), a strange combination of a
+spreadsheet and a photo editor.
 
 # Install
 
@@ -61,99 +76,63 @@ There are binaries for Windows in
 The [libvips website](https://libvips.github.io/libvips) has [detailed
 install notes](https://libvips.github.io/libvips/install.html).
 
-# Building libvips from a source tarball
+# Building from source
 
-We keep pre-baked tarballs in
-[releases](https://github.com/libvips/libvips/releases).
+libvips uses the [Meson build system](https://mesonbuild.com), version 0.56
+or later. Meson can use [`ninja`](https://ninja-build.org), Visual Studio or
+XCode as a backend, so you'll also need one of them.
 
-Untar, then in the libvips directory you should just be able to do:
+libvips must have `build-essential`, `pkg-config`, `libglib2.0-dev`,
+`libexpat1-dev`.  See the **Dependencies** section below for a full list
+of the libvips optional dependencies.
 
-    ./configure
+There are basic bash completions in `completions/`, see the README in there.
 
-Check the summary at the end of `configure` carefully.  libvips must have
-`build-essential`, `pkg-config`, `libglib2.0-dev`, `libexpat1-dev`.
+## Cheatsheet
 
-You'll need the dev packages for the file format support you want. For basic
-jpeg and tiff support, you'll need `libtiff5-dev`, `libjpeg-turbo8-dev`,
-and `libgsf-1-dev`.  See the **Dependencies** section below for a full list
-of the things that libvips can be configured to use.
+```
+cd libvips-x.y.x
+meson setup build --prefix /my/install/prefix
+cd build
+meson compile
+meson test
+meson install
+```
 
-Once `configure` is looking OK, compile and install with the usual:
+Check the output of `meson setup` carefully and make sure it found everything
+you wanted it to find.  Add arguments to `meson setup` to change the build
+configuration.
 
-    make
-    sudo make install
+- Add flags like `-Dnsgif=false` to turn libvips options on and off, see
+  `meson_options.txt` for a list of all the build options libvips supports.
 
-By default this will install files to `/usr/local`.
+- Add flags like `-Dmagick=disabled` to turn libvips dependencies on and off,
+  see `meson_options.txt` and the list below for a summary of all the libvips
+  dependencies.
 
-# Testing
+- You might need to add `--libdir lib` on Debian if you don't want the arch
+  name in the library path.
 
-Run the test suite with:
+- Add `--default-library static` for a static build.
 
-    make check
+- Use e.g. `CC=clang CXX=clang++ meson setup ...` to change compiler.
 
-Run a specific test with:
+- You can have an alternative build directory, pick whatever names you like,
+  for example one for release and one for debug.
 
-    pytest test/test-suite/test_foreign.py -k test_tiff
-
-# Building libvips from git
-
-Clone the latest sources with:
-
-    git clone git://github.com/libvips/libvips.git
-
-Building from git needs more packages -- you'll need at least `gtk-doc` 
-and `gobject-introspection`, see the dependencies section below. For example:
-
-    brew install gtk-doc 
-
-Then generate the build system with:
-
-    ./autogen.sh --prefix=/home/john/vips
-
-Debug build:
-
-    CFLAGS="-g -Wall" CXXFLAGS="-g -Wall" \
-      ./configure --prefix=/home/john/vips --enable-debug
-    make
-    make install
-
-# Built-in loaders
-
-libvips has a number of built-in loaders and savers. You can disable these if
-you wish, for example:
-
-    ./configure --prefix=/Users/john/vips --without-nsgif --without-ppm
-
-# Dependencies 
-
-libvips has to have `libglib2.0-dev` and `libexpat1-dev`. Other dependencies
-are optional.
+There's a more comprehensive test suite you can run once libvips has been
+installed. Use `pytest` in the libvips base directory.
 
 ## Optional dependencies
 
 If suitable versions are found, libvips will add support for the following
-libraries automatically. See `./configure --help` for a set of flags to
-control library detection. Packages are generally found with `pkg-config`,
+libraries automatically. Packages are generally found with `pkg-config`,
 so make sure that is working.
-
-Libraries like nifti do not use `pkg-config` so libvips will also
-look for them in the default path and in `$prefix`. If you have installed
-your own versions of these libraries in a different location, libvips will
-not see them. Use switches to libvips configure like:
-
-    ./configure --prefix=/Users/john/vips \
-      --with-nifti-includes=/opt/local/include \
-      --with-nifti-libraries=/opt/local/lib 
-
-or perhaps:
-
-    CFLAGS="-g -Wall -I/opt/local/include -L/opt/local/lib" \
-      CXXFLAGS="-g -Wall -I/opt/local/include -L/opt/local/lib" \
-      ./configure --prefix=/Users/john/vips 
 
 ### libjpeg
 
-The IJG JPEG library. Use the `-turbo` version if you can. 
+Anything that is compatible with the IJG JPEG library. Use `mozjpeg` if you
+can. Another option is `libjpeg-turbo`.
 
 ### libexif
 
@@ -166,8 +145,8 @@ via imagemagick instead.
 
 ### PDFium
 
-If present, libvips will attempt to load PDFs with PDFium. Download the 
-prebuilt pdfium binary from: 
+If present, libvips will attempt to load PDFs with PDFium. Download the
+prebuilt pdfium binary from:
 
     https://github.com/bblanchon/pdfium-binaries
 
@@ -192,67 +171,69 @@ Create a `pdfium.pc` like this (update the version number):
          Cflags: -I\${includedir}
     EOF
 
-If PDFium is not detected, libvips will look for poppler-glib instead.
+If PDFium is not detected, libvips will look for `poppler-glib` instead.
 
 ### poppler-glib
 
 The Poppler PDF renderer, with a glib API. If this is not present, vips
 will try to load PDFs via imagemagick.
 
-### libgsf-1
+### cgif
 
-If available, libvips adds support for creating image pyramids with `dzsave`. 
+If available, libvips will save GIFs with
+[cgif](https://github.com/dloebl/cgif). If this is not present, vips will
+try to save gifs via imagemagick instead.
+
+### libarchive
+
+If available, libvips adds support for creating image pyramids with `dzsave`.
 
 ### libtiff
 
 The TIFF library. It needs to be built with support for JPEG and
-ZIP compression. 3.4b037 and later are known to be OK. 
+ZIP compression. 3.4b037 and later are known to be OK.
 
 ### fftw3
 
-If libvips finds this library, it uses it for fourier transforms. 
+If libvips finds this library, it uses it for fourier transforms.
 
 ### lcms2
 
 If present, `vips_icc_import()`, `vips_icc_export()` and `vips_icc_transform()`
-can be used to manipulate images with ICC profiles. 
+can be used to manipulate images with ICC profiles.
 
 ### libspng
 
-If present, libvips will load PNG files using libspng. At the moment, libpng
-is still necessary for save.
+If present, libvips will load and save PNG files using libspng. If not, it
+will look for the standard libpng package.
 
-### libpng
+### libimagequant, quantizr
 
-If libspng is not present and libpng is, libvips will load PNG files with
-libpng. It will always save PNG files with libpng.
-
-### libimagequant
-
-If present, libvips can write 8-bit palette-ised PNGs.
+If one of these quantisation packages is present, libvips can write 8-bit
+palette-ised PNGs and GIFs.
 
 ### ImageMagick, or optionally GraphicsMagick
 
-If available, libvips adds support for loading all libMagick-supported
-image file types. Use `--with-magickpackage=GraphicsMagick` to build against 
-graphicsmagick instead.
+If available, libvips adds support for loading and saving all
+libMagick-supported image file types. You can enable and disable load and save
+separately.
 
 Imagemagick 6.9+ needs to have been built with `--with-modules`. Most packaged
 IMs are, I think.
 
 If you are going to be using libvips with untrusted images, perhaps in a
 web server, for example, you should consider the security implications of
-enabling a package with such a large attack surface. 
+enabling a package with such a large attack surface.
 
 ### pangocairo
 
 If available, libvips adds support for text rendering. You need the
 package pangocairo in `pkg-config --list-all`.
 
-### orc-0.4
+### highway
 
-If available, vips will accelerate some operations with this run-time
-compiler.
+If present, libvips will accelerate some operations with SIMD. If not, it
+will look for the orc-0.4 package.
 
 ### matio
 
@@ -294,38 +275,32 @@ If available, libvips can load and save HEIC and AVIF images. Your libheif (in
 turn) needs to be built with the correct decoders and encoders. You can check
 with eg.:
 
-```
-$ pkg-config libheif --print-variables
-builtin_avif_decoder
-builtin_avif_encoder
-builtin_h265_decoder
-builtin_h265_encoder
-exec_prefix
-includedir
-libdir
-pcfiledir
-prefix
+```console
+$ heif-convert --list-decoders
+HEIC decoders:
+- libde265 = libde265 HEVC decoder, version 1.0.9
+AVIF decoders:
+- dav1d = dav1d v6.6.0
+- aom = AOMedia Project AV1 Decoder v3.5.0
+$ heif-enc --list-encoders
+HEIC encoders:
+- x265 = x265 HEVC encoder (3.5+1-f0c1022b6) [default]
+AVIF encoders:
+- aom = AOMedia Project AV1 Encoder v3.5.0 [default]
+- svt = SVT-AV1 encoder v1.1.0
+- rav1e = Rav1e encoder
 ```
 
 # Contributors
 
 ### Code Contributors
 
-This project exists thanks to all the people who contribute. 
+This project exists thanks to all the people who contribute.
 
 <a href="https://github.com/libvips/libvips/graphs/contributors"><img src="https://opencollective.com/libvips/contributors.svg?width=890&button=false" /></a>
 
 ### Organizations
 
-Support this project with your organization. Your logo will show up here with a link to your website. 
+We've had generous financial support from our sponsors. Thank you very much!
 
-<a href="https://opencollective.com/libvips/organization/0/website"><img src="https://opencollective.com/libvips/organization/0/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/1/website"><img src="https://opencollective.com/libvips/organization/1/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/2/website"><img src="https://opencollective.com/libvips/organization/2/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/3/website"><img src="https://opencollective.com/libvips/organization/3/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/4/website"><img src="https://opencollective.com/libvips/organization/4/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/5/website"><img src="https://opencollective.com/libvips/organization/5/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/6/website"><img src="https://opencollective.com/libvips/organization/6/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/7/website"><img src="https://opencollective.com/libvips/organization/7/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/8/website"><img src="https://opencollective.com/libvips/organization/8/avatar.svg"></a>
-<a href="https://opencollective.com/libvips/organization/9/website"><img src="https://opencollective.com/libvips/organization/9/avatar.svg"></a>
+<img src="https://opencollective.com/libvips/sponsors.svg?width=890&button=false" />

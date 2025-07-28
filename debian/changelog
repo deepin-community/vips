@@ -1,3 +1,184 @@
+vips (8.16.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 15 Mar 2025 16:12:33 +0100
+
+vips (8.16.0-2) unstable; urgency=medium
+
+  * Backport upstream fix for PFM byte order on big-endian machines.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 30 Nov 2024 10:36:59 +0100
+
+vips (8.16.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Thu, 31 Oct 2024 19:00:38 +0100
+
+vips (8.15.3-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Multiarchify the typelib file.
+  * Update Standards-Version to 4.7.0 .
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 17 Aug 2024 17:45:47 +0200
+
+vips (8.15.2-2) unstable; urgency=medium
+
+  [ Helmut Grohne <helmut@subdivi.de> ]
+  * Skip documentation in arch-only build (closes: #1077535).
+
+  [ Laszlo Boszormenyi (GCS) ]
+  * Update watch file.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Tue, 30 Jul 2024 06:32:54 +0000
+
+vips (8.15.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Wed, 20 Mar 2024 20:17:35 +0100
+
+vips (8.15.1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Rename libraries for 64-bit time_t transition.  Closes: #1063046
+
+ -- Steve Langasek <vorlon@debian.org>  Wed, 28 Feb 2024 22:40:47 +0000
+
+vips (8.15.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+  [ Adrian Bunk <bunk@debian.org> ]
+  * Increase the self-testing timeout further and make it unconditional
+    (closes: #1057347).
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Wed, 03 Jan 2024 06:58:38 +0100
+
+vips (8.15.0-2) unstable; urgency=medium
+
+  * Triple self-testing timeout on slower architectures.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 18 Nov 2023 21:28:00 +0100
+
+vips (8.15.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Double self-testing timeout on hppa, hurd-i386 and sparc64 architectures.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 12 Nov 2023 16:08:41 +0100
+
+vips (8.15.0~rc2-2) unstable; urgency=medium
+
+  * Backport upstream fix for i386 compilation.
+  * Switch PNG load/save with libspng.
+  * Compile with image pyramid save support.
+  * Compile with SIMD support with highway.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Thu, 09 Nov 2023 17:14:31 +0100
+
+vips (8.15.0~rc2-1) unstable; urgency=medium
+
+  * New upstream release candidate version.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Tue, 07 Nov 2023 19:36:33 +0100
+
+vips (8.14.5-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Thu, 28 Sep 2023 18:22:26 +0200
+
+vips (8.14.4-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 19 Aug 2023 15:27:44 +0200
+
+vips (8.14.3-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 29 Jul 2023 08:05:03 +0200
+
+vips (8.14.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Install examples to libvips-dev package.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 01 Apr 2023 13:16:58 +0200
+
+vips (8.14.1-3) unstable; urgency=medium
+
+  * Double self-testing timeout on mips64el and mipsel architectures.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Mon, 13 Feb 2023 10:48:58 +0100
+
+vips (8.14.1-2) unstable; urgency=medium
+
+  * Backport upstream fixes:
+    - dedupe FITS header write,
+    - fix target pnm write.
+  * Build dependency on libgif-dev is not needed anymore.
+  * Suggest only nip2 on libvips42 and libvips-tools.
+  * Update Standards-Version to 4.6.2 .
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 12 Feb 2023 08:52:21 +0100
+
+vips (8.14.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Build with JPEG XL support.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Tue, 17 Jan 2023 07:01:01 +0100
+
+vips (8.13.3-2) unstable; urgency=medium
+
+  * Adjust build dependency to libfftw3-dev (closes: #1025317).
+  * Update Standards-Version to 4.6.1 .
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 04 Dec 2022 20:17:39 +0100
+
+vips (8.13.3-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Use DEP5 copyright format.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 12 Nov 2022 07:01:18 +0100
+
+vips (8.13.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 02 Oct 2022 20:10:46 +0200
+
+vips (8.13.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Mon, 12 Sep 2022 19:09:22 +0200
+
+vips (8.13.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Fri, 29 Jul 2022 17:59:07 +0200
+
+vips (8.12.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Mon, 28 Feb 2022 22:28:00 +0100
+
+vips (8.12.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Build with CGIF support.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Wed, 15 Dec 2021 15:34:32 +0100
+
 vips (8.11.4-2) unstable; urgency=medium
 
   * Handle symlink to directory switch in libvips-doc (closes: #995674).
