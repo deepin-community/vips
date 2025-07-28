@@ -4,9 +4,7 @@ import math
 import pytest
 
 import pyvips
-from helpers import unsigned_formats, float_formats, noncomplex_formats, \
-    all_formats, run_fn, run_image2, run_const, run_cmp, \
-    assert_almost_equal_objects
+from helpers import *
 
 
 class TestArithmetic:
@@ -16,10 +14,10 @@ class TestArithmetic:
          for x in self.all_images for y in fmt for z in fmt]
 
     def run_arith_const(self, fn, fmt=all_formats):
-        [run_const('%s scalar %s %s' % (fn.__name__, x, y), 
+        [run_const('%s scalar %s %s' % (fn.__name__, x, y),
                    fn, x.cast(y), 2)
          for x in self.all_images for y in fmt]
-        [run_const('%s vector %s' % (fn.__name__, y), 
+        [run_const('%s vector %s' % (fn.__name__, y),
                    fn, self.colour.cast(y), [1, 2, 3])
          for y in fmt]
 
@@ -32,6 +30,21 @@ class TestArithmetic:
     def run_unary(self, images, fn, fmt=all_formats):
         [self.run_imageunary(fn.__name__ + ' image', x.cast(y), fn)
          for x in images for y in fmt]
+
+    # run a function on a pair of images
+    # 50,50 and 10,10 should have different values on the test image
+    # don't loop over band elements
+    def run_imagebinary(self, message, left, right, fn):
+        run_cmp2(message, left, right, 50, 50, fn)
+        run_cmp2(message, left, right, 10, 10, fn)
+
+    def run_binary(self, images, fn, fmt=all_formats):
+        [self.run_imagebinary(f'{fn.__name__ } {y} {x}',
+                              x.cast(y), x.cast(z), fn)
+         for x in images for y in fmt for z in fmt]
+
+    def versiontuple(version_string):
+        return tuple(map(int, (version_string.split('.'))))
 
     @classmethod
     def setup_class(cls):
@@ -383,8 +396,6 @@ class TestArithmetic:
             assert pytest.approx(y) == 50
             assert pytest.approx(r) == 40
 
-    @pytest.mark.skipif(not pyvips.base.at_least_libvips(8, 7),
-                        reason="requires libvips >= 8.7")
     def test_hough_line(self):
         # hough_line changed the way it codes parameter space in 8.7 ... don't
         # test earlier versions
@@ -458,6 +469,101 @@ class TestArithmetic:
 
         im = (pyvips.Image.black(100, 100) + [1, 2, 3]) / 3.0
         self.run_unary([im], my_atan, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for sinh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_sinh(self):
+        def my_sinh(x):
+            if isinstance(x, pyvips.Image):
+                return x.sinh()
+            else:
+                return math.sinh(x)
+
+        self.run_unary(self.all_images, my_sinh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for cosh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_cosh(self):
+        def my_cosh(x):
+            if isinstance(x, pyvips.Image):
+                return x.cosh()
+            else:
+                return math.cosh(x)
+
+        self.run_unary(self.all_images, my_cosh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for tanh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_tanh(self):
+        def my_tanh(x):
+            if isinstance(x, pyvips.Image):
+                return x.tanh()
+            else:
+                return math.tanh(x)
+
+        self.run_unary(self.all_images, my_tanh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for asinh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_asinh(self):
+        def my_asinh(x):
+            if isinstance(x, pyvips.Image):
+                return x.asinh()
+            else:
+                return math.asinh(x)
+
+        im = (pyvips.Image.black(100, 100) + [4, 5, 6]) / 3.0
+        self.run_unary([im], my_asinh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for acosh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_acosh(self):
+        def my_acosh(x):
+            if isinstance(x, pyvips.Image):
+                return x.acosh()
+            else:
+                return math.acosh(x)
+
+        im = (pyvips.Image.black(100, 100) + [4, 5, 6]) / 3.0
+        self.run_unary([im], my_acosh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for atanh
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_atanh(self):
+        def my_atanh(x):
+            if isinstance(x, pyvips.Image):
+                return x.atanh()
+            else:
+                return math.atanh(x)
+
+        im = (pyvips.Image.black(100, 100) + [0, 1, 2]) / 3.0
+        self.run_unary([im], my_atanh, fmt=noncomplex_formats)
+
+    # this requires pyvips 2.1.16 for atan2
+    @pytest.mark.skipif(versiontuple(pyvips.__version__) <
+            versiontuple('2.1.16'),
+            reason='your pyvips is too old')
+    def test_atan2(self):
+        def my_atan2(x, y):
+            if isinstance(x, pyvips.Image):
+                return x.atan2(y)
+            else:
+                return math.degrees(math.atan2(x[0], y[0]))
+
+        im = (pyvips.Image.black(100, 100) + [1, 2, 3]) / 3.0
+        self.run_binary(im, my_atan2, fmt=noncomplex_formats)
 
     def test_log(self):
         def my_log(x):
@@ -588,7 +694,8 @@ class TestArithmetic:
                 assert height == 60
 
             test_rgb = test.bandjoin([test, test])
-            left, top, width, height = test_rgb.find_trim(background=[255, 255,
+            left, top, width, height = test_rgb.find_trim(line_art=True,
+                                                          background=[255, 255,
                                                                       255])
             assert left == 10
             assert top == 20
@@ -651,6 +758,37 @@ class TestArithmetic:
             im2 = [(im + x).cast(fmt) for x in range(0, 100, 10)]
             im3 = pyvips.Image.sum(im2)
             assert pytest.approx(im3.max()) == sum(range(0, 100, 10))
+
+    def test_clamp(self):
+        for fmt in noncomplex_formats:
+            im = self.colour
+            for x in range(0, 100, 10):
+                im2 = (im + x).cast(fmt)
+                im3 = im2.clamp()
+                assert im3.max() <= 1.0
+                assert im3.min() >= 0.0
+
+                im3 = im2.clamp(min=14, max=45)
+                assert im3.max() <= 45
+                assert im3.min() >= 14
+
+    def test_minpair(self):
+        for fmt in noncomplex_formats:
+            im = self.colour
+            for x in range(0, 100, 10):
+                im2 = ((im - x) * 5).cast(fmt)
+                im3 = im2.minpair(im)
+                im4 = (im2 < im).ifthenelse(im2, im)
+                assert (im3 - im4).abs().max() == 0
+
+    def test_maxpair(self):
+        for fmt in noncomplex_formats:
+            im = self.colour
+            for x in range(0, 100, 10):
+                im2 = ((im - x) * 5).cast(fmt)
+                im3 = im2.maxpair(im)
+                im4 = (im2 > im).ifthenelse(im2, im)
+                assert (im3 - im4).abs().max() == 0
 
 
 if __name__ == '__main__':

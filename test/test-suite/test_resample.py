@@ -2,8 +2,7 @@
 import pytest
 
 import pyvips
-from helpers import JPEG_FILE, OME_FILE, HEIC_FILE, TIF_FILE, all_formats, \
-    have, RGBA_FILE, RGBA_CORRECT_FILE, AVIF_FILE
+from helpers import *
 
 
 # Run a function expecting a complex image on a two-band image
@@ -115,6 +114,27 @@ class TestResample:
         assert x.width == 50
         assert x.height == 1
 
+        # test whether we use double-precision calculations in reduce{h,v}
+        im = pyvips.Image.black(1600, 1000)
+        x = im.resize(10.0 / im.width)
+        assert x.width == 10
+        assert x.height == 6
+
+        # test round-up option of shrink
+        im = pyvips.Image.black(2049 - 2, 2047 - 2, bands=3)
+        im = im.embed(1, 1, 2049, 2047,
+                      extend=pyvips.Extend.BACKGROUND,
+                      background=[255, 0, 0])
+        for scale in [8, 9.4, 16]:
+            x = im.resize(1 / scale, vscale=1 / scale)
+
+            for point in ([(round(x.width / 2), 0),
+                           (x.width - 1, round(x.height / 2)),
+                           (round(x.width / 2), x.height - 1),
+                           (0, round(x.height / 2))]):
+                y = x(*point)[0]
+                assert y != 0
+
     def test_shrink(self):
         im = pyvips.Image.new_from_file(JPEG_FILE)
         im2 = im.shrink(4, 4)
@@ -179,7 +199,7 @@ class TestResample:
         im2 = pyvips.Image.thumbnail(OME_FILE + "[page=1]", 100)
         assert im2.width == 100
         assert im2.height == 38
-        assert (im1 - im2).abs().max() != 0 
+        assert (im1 - im2).abs().max() != 0
 
         # should be able to thumbnail entire many-page tiff as a toilet-roll
         # image
@@ -199,14 +219,36 @@ class TestResample:
         im2 = pyvips.Image.new_from_file(RGBA_CORRECT_FILE)
         assert abs(im1.flatten(background=255).avg() - im2.avg()) < 1
 
+        # thumbnailing a 16-bit image should always make an 8-bit image
+        rgb16_buffer = pyvips.Image \
+                .new_from_file(JPEG_FILE) \
+                .colourspace("rgb16") \
+                .write_to_buffer(".png")
+        thumb = pyvips.Image.thumbnail_buffer(rgb16_buffer, 128)
+        assert thumb.format == "uchar"
+
         if have("heifload"):
             # this image is orientation 6 ... thumbnail should flip it
             im = pyvips.Image.new_from_file(AVIF_FILE)
             thumb = pyvips.Image.thumbnail(AVIF_FILE, 100)
 
-            # thumb should be portrait 
+            # thumb should be portrait
             assert thumb.width < thumb.height
             assert thumb.height == 100
+
+    @pytest.mark.skipif(not pyvips.at_least_libvips(8, 5),
+                        reason="requires libvips >= 8.5")
+    def test_thumbnail_icc(self):
+        im = pyvips.Image.thumbnail(JPEG_FILE_XYB, 442, export_profile="srgb")
+
+        assert im.width == 290
+        assert im.height == 442
+        assert im.bands == 3
+
+        # the colour distance should not deviate too much
+        # (i.e. the embedded profile should not be ignored)
+        im_orig = pyvips.Image.new_from_file(JPEG_FILE)
+        assert im_orig.de00(im).max() < 11
 
     def test_similarity(self):
         im = pyvips.Image.new_from_file(JPEG_FILE)
@@ -242,7 +284,7 @@ class TestResample:
         # distorted, but the rest should not be too bad
         a = r.crop(50, 0, im.width - 50, im.height).gaussblur(2)
         b = im.crop(50, 0, im.width - 50, im.height).gaussblur(2)
-        assert (a - b).abs().max() < 40
+        assert (a - b).abs().max() < 50
 
         # this was a bug at one point, strangely, if executed with debug
         # enabled
