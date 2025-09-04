@@ -1,3 +1,9 @@
+vips (8.16.1-1deepin2) unstable; urgency=medium
+
+  * Rebuild against imagemagick 7.
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Thu, 04 Sep 2025 23:05:16 +0800
+
 vips (8.16.1-1deepin1) unstable; urgency=medium
 
   * revert t64.
