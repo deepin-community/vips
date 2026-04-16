@@ -80,6 +80,10 @@ typedef struct _VipsForeignLoadJp2k {
 	int page;
 	int shrink;
 
+	/* Load images a frame at a time rather than a tile at a time.
+	 */
+	gboolean oneshot;
+
 	/* Decompress state.
 	 */
 	opj_stream_t *stream;			/* Source as an opj stream */
@@ -237,10 +241,8 @@ vips_foreign_load_jp2k_build(VipsObject *object)
 		}
 	}
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_parent_class)->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_parent_class)
+		->build(object);
 }
 
 #define JP2_RFC3745_MAGIC "\x00\x00\x00\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a"
@@ -279,7 +281,12 @@ vips_foreign_load_jp2k_is_a_source(VipsSource *source)
 static VipsForeignFlags
 vips_foreign_load_jp2k_get_flags(VipsForeignLoad *load)
 {
-	return VIPS_FOREIGN_PARTIAL;
+	VipsForeignLoadJp2k *jp2k = (VipsForeignLoadJp2k *) load;
+
+	if (jp2k->oneshot)
+		return VIPS_FOREIGN_SEQUENTIAL;
+	else
+		return VIPS_FOREIGN_PARTIAL;
 }
 
 /* The openjpeg info and warning callbacks are incredibly chatty.
@@ -582,23 +589,28 @@ vips_foreign_load_jp2k_set_header(VipsForeignLoadJp2k *jp2k, VipsImage *out)
 	vips_image_set_int(out,
 		VIPS_META_BITS_PER_SAMPLE, jp2k->image->comps[0].prec);
 
+	/* Keep in sync with vips_foreign_load_jp2k_load().
+	 */
+	if (!jp2k->oneshot &&
+		(jp2k->info->tw != 1 || jp2k->info->th != 1)) {
+		vips_image_set_int(out, VIPS_META_TILE_WIDTH, jp2k->info->tdx);
+		vips_image_set_int(out, VIPS_META_TILE_HEIGHT, jp2k->info->tdy);
+	}
+
 	return 0;
 }
 
 /* Is an image a type we handle? We don't support various strange jp2k types.
  */
 static int
-vips_foreign_load_jp2k_check_supported(VipsForeignLoadJp2k *jp2k,
-	opj_image_t *image)
+vips_foreign_load_jp2k_check_supported(opj_image_t *image)
 {
-	VipsObjectClass *class = VIPS_OBJECT_GET_CLASS(jp2k);
-
 	if (image->numcomps > MAX_BANDS) {
-		vips_error(class->nickname, "%s", _("too many image bands"));
+		vips_error("jp2kload", "%s", _("too many image bands"));
 		return -1;
 	}
 	if (image->numcomps == 0) {
-		vips_error(class->nickname, "%s", _("no image components"));
+		vips_error("jp2kload", "%s", _("no image components"));
 		return -1;
 	}
 
@@ -614,15 +626,13 @@ vips_foreign_load_jp2k_check_supported(VipsForeignLoadJp2k *jp2k,
 			this->h * this->dy != first->h * first->dy ||
 			this->resno_decoded != first->resno_decoded ||
 			this->factor != first->factor) {
-			vips_error(class->nickname,
-				"%s", _("components differ in geometry"));
+			vips_error("jp2kload", "%s", _("components differ in geometry"));
 			return -1;
 		}
 
 		if (this->prec != first->prec ||
 			this->sgnd != first->sgnd) {
-			vips_error(class->nickname,
-				"%s", _("components differ in precision"));
+			vips_error("jp2kload", "%s", _("components differ in precision"));
 			return -1;
 		}
 	}
@@ -658,7 +668,7 @@ vips_foreign_load_jp2k_header(VipsForeignLoad *load)
 	if (!(jp2k->info = opj_get_cstr_info(jp2k->codec)))
 		return -1;
 
-	if (vips_foreign_load_jp2k_check_supported(jp2k, jp2k->image))
+	if (vips_foreign_load_jp2k_check_supported(jp2k->image))
 		return -1;
 
 	/* If any dx/dy are not 1, we'll need to upsample components during
@@ -986,7 +996,7 @@ vips_foreign_load_jp2k_generate_untiled(VipsRegion *out,
 	if (!opj_decode(jp2k->codec, jp2k->stream, jp2k->image))
 		return -1;
 
-	if (vips_foreign_load_jp2k_check_supported(jp2k, jp2k->image))
+	if (vips_foreign_load_jp2k_check_supported(jp2k->image))
 		return -1;
 
 	/* Tragically, jp2k allows the decoded image to not match the wrapper.
@@ -1082,7 +1092,7 @@ vips_foreign_load_jp2k_generate_tiled(VipsRegion *out,
 					jp2k->stream, jp2k->image, tile_index))
 				return -1;
 
-			if (vips_foreign_load_jp2k_check_supported(jp2k, jp2k->image))
+			if (vips_foreign_load_jp2k_check_supported(jp2k->image))
 				return -1;
 
 			/* Tragically, jp2k allows the decoded image to not match the
@@ -1147,9 +1157,9 @@ vips_foreign_load_jp2k_load(VipsForeignLoad *load)
 	VipsImage **t = (VipsImage **)
 		vips_object_local_array(VIPS_OBJECT(load), 3);
 
-	int vips_tile_width;
-	int vips_tile_height;
-	int vips_tiles_across;
+	int tile_width;
+	int tile_height;
+	int tiles_across;
 
 #ifdef DEBUG
 	printf("vips_foreign_load_jp2k_load:\n");
@@ -1161,13 +1171,11 @@ vips_foreign_load_jp2k_load(VipsForeignLoad *load)
 
 	/* Untiled jp2k images need a different read API.
 	 */
-	if (jp2k->info->tw == 1 &&
-		jp2k->info->th == 1) {
-		vips_tile_width = 512;
-		vips_tile_height = 512;
-		vips_tiles_across =
-			VIPS_ROUND_UP(t[0]->Xsize, vips_tile_width) /
-			vips_tile_width;
+	if (jp2k->oneshot ||
+		(jp2k->info->tw == 1 && jp2k->info->th == 1)) {
+		tile_width = jp2k->width;
+		tile_height = jp2k->height;
+		tiles_across = 1;
 
 		if (vips_image_generate(t[0],
 				NULL, vips_foreign_load_jp2k_generate_untiled, NULL,
@@ -1175,9 +1183,11 @@ vips_foreign_load_jp2k_load(VipsForeignLoad *load)
 			return -1;
 	}
 	else {
-		vips_tile_width = jp2k->info->tdx;
-		vips_tile_height = jp2k->info->tdy;
-		vips_tiles_across = jp2k->info->tw;
+		/* Keep in sync with tile size in vips_foreign_load_jp2k_set_header().
+		 */
+		tile_width = jp2k->info->tdx;
+		tile_height = jp2k->info->tdy;
+		tiles_across = jp2k->info->tw;
 
 		if (vips_image_generate(t[0],
 				NULL, vips_foreign_load_jp2k_generate_tiled, NULL,
@@ -1189,9 +1199,9 @@ vips_foreign_load_jp2k_load(VipsForeignLoad *load)
 	 * rows, plus 50%.
 	 */
 	if (vips_tilecache(t[0], &t[1],
-			"tile_width", vips_tile_width,
-			"tile_height", vips_tile_height,
-			"max_tiles", 3 * vips_tiles_across,
+			"tile_width", tile_width,
+			"tile_height", tile_height,
+			"max_tiles", 3 * tiles_across,
 			NULL))
 		return -1;
 
@@ -1231,6 +1241,14 @@ vips_foreign_load_jp2k_class_init(VipsForeignLoadJp2kClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignLoadJp2k, page),
 		0, 100000, 0);
+
+	VIPS_ARG_BOOL(class, "oneshot", 21,
+		_("One-shot"),
+		_("Load images a frame at a time"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignLoadJp2k, oneshot),
+		FALSE);
+
 }
 
 static void
@@ -1262,11 +1280,8 @@ vips_foreign_load_jp2k_file_build(VipsObject *object)
 		!(jp2k->source = vips_source_new_from_file(file->filename)))
 		return -1;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_file_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_file_parent_class)
+		->build(object);
 }
 
 const char *vips__jp2k_suffs[] = {
@@ -1344,11 +1359,8 @@ vips_foreign_load_jp2k_buffer_build(VipsObject *object)
 				  VIPS_AREA(buffer->buf)->length)))
 			return -1;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_file_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_buffer_parent_class)
+		->build(object);
 }
 
 static gboolean
@@ -1419,11 +1431,8 @@ vips_foreign_load_jp2k_source_build(VipsObject *object)
 		g_object_ref(jp2k->source);
 	}
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_source_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_jp2k_source_parent_class)
+		->build(object);
 }
 
 static void
@@ -1550,8 +1559,12 @@ vips__foreign_load_jp2k_decompress(VipsImage *out,
 		return -1;
 	}
 
+	if (vips_foreign_load_jp2k_check_supported(decompress.image))
+		return -1;
+
 	if (decompress.image->x1 > width ||
 		decompress.image->y1 > height ||
+		decompress.image->numcomps > out->Bands ||
 		line_size * height > to_length) {
 		vips_error("jp2kload", "%s", ("bad dimensions"));
 		vips__foreign_load_jp2k_decompress_free(&decompress);
@@ -1607,14 +1620,11 @@ vips__foreign_load_jp2k_decompress(VipsImage *out,
  * vips_jp2kload:
  * @filename: file to load
  * @out: (out): decompressed image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Read a JPEG2000 image.
  *
- * * @page: %gint, load this page
- * * @fail_on: #VipsFailOn, types of read error to fail on
- *
- * Read a JPEG2000 image. The loader supports 8, 16 and 32-bit int pixel
+ * The loader supports 8, 16 and 32-bit int pixel
  * values, signed and unsigned. It supports greyscale, RGB, YCC, CMYK and
  * multispectral colour spaces. It will read any ICC profile on the image.
  *
@@ -1624,10 +1634,20 @@ vips__foreign_load_jp2k_decompress(VipsImage *out,
  * image and higher-numbered pages are x2 reductions. Use the metadata item
  * "n-pages" to find the number of pyramid layers.
  *
- * Use @fail_on to set the type of error that will cause load to fail. By
- * default, loaders are permissive, that is, #VIPS_FAIL_ON_NONE.
+ * Some versions of openjpeg can fail to decode some tiled images correctly.
+ * Setting @oneshot will force the loader to decode tiled images in a single
+ * operation and can improve compatibility.
  *
- * See also: vips_image_new_from_file().
+ * Use @fail_on to set the type of error that will cause load to fail. By
+ * default, loaders are permissive, that is, [enum@Vips.FailOn.NONE].
+ *
+ * ::: tip "Optional arguments"
+ *     * @page: `gint`, load this page
+ *     * @oneshot: `gboolean`, load pages in one-shot mode
+ *     * @fail_on: [enum@FailOn], types of read error to fail on
+ *
+ * ::: seealso
+ *     [ctor@Image.new_from_file].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1649,17 +1669,17 @@ vips_jp2kload(const char *filename, VipsImage **out, ...)
  * @buf: (array length=len) (element-type guint8): memory area to load
  * @len: (type gsize): size of memory area
  * @out: (out): image to write
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
- *
- * * @page: %gint, load this page
- * * @fail_on: #VipsFailOn, types of read error to fail on
- *
- * Exactly as vips_jp2kload(), but read from a buffer.
+ * Exactly as [ctor@Image.jp2kload], but read from a buffer.
  *
  * You must not free the buffer while @out is active. The
- * #VipsObject::postclose signal on @out is a good place to free.
+ * [signal@Object::postclose] signal on @out is a good place to free.
+ *
+ * ::: tip "Optional arguments"
+ *     * @page: `gint`, load this page
+ *     * @oneshot: `gboolean`, load pages in one-shot mode
+ *     * @fail_on: [enum@FailOn], types of read error to fail on
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1687,14 +1707,14 @@ vips_jp2kload_buffer(void *buf, size_t len, VipsImage **out, ...)
  * vips_jp2kload_source:
  * @source: source to load from
  * @out: (out): decompressed image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Exactly as [ctor@Image.jp2kload], but read from a source.
  *
- * * @page: %gint, load this page
- * * @fail_on: #VipsFailOn, types of read error to fail on
- *
- * Exactly as vips_jp2kload(), but read from a source.
+ * ::: tip "Optional arguments"
+ *     * @page: `gint`, load this page
+ *     * @oneshot: `gboolean`, load pages in one-shot mode
+ *     * @fail_on: [enum@FailOn], types of read error to fail on
  *
  * Returns: 0 on success, -1 on error.
  */

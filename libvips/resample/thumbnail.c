@@ -41,6 +41,8 @@
  *	- skip colourspace conversion when needed
  * 27/1/24
  *	- make icc profile transforms always write 8 bits
+ * 22/8/25 kleisauke
+ *	- remove seq line cache from thumbnail_image, use hint instead
  */
 
 /*
@@ -116,8 +118,8 @@ typedef struct _VipsThumbnail {
 	gboolean no_rotate;
 	VipsInteresting crop;
 	gboolean linear;
-	char *export_profile;
-	char *import_profile;
+	char *output_profile;
+	char *input_profile;
 	VipsIntent intent;
 	VipsFailOn fail_on;
 
@@ -308,6 +310,9 @@ vips_thumbnail_get_pyramid_page(VipsThumbnail *thumbnail)
 #ifdef DEBUG
 	printf("vips_thumbnail_get_pyramid_page: %d layer pyramid detected\n",
 		thumbnail->n_pages);
+	for (int i = 0; i < thumbnail->n_pages; i++)
+		printf("  %d - %d x %d\n",
+			i, thumbnail->level_width[i], thumbnail->level_height[i]);
 #endif /*DEBUG*/
 	thumbnail->level_count = thumbnail->n_pages;
 }
@@ -486,7 +491,7 @@ vips_thumbnail_find_jpegshrink(VipsThumbnail *thumbnail,
 
 	/* Shrink-on-load is a simple block shrink and will add quite a bit of
 	 * extra sharpness to the image. We want to block shrink to a
-	 * bit above our target, then vips_shrink() / vips_reduce() to the
+	 * bit above our target, then vips_shrink / vips_reduce() to the
 	 * final size.
 	 *
 	 * Leave at least a factor of two for the final resize step.
@@ -512,11 +517,15 @@ vips_thumbnail_find_pyrlevel(VipsThumbnail *thumbnail,
 	g_assert(thumbnail->level_count > 0);
 	g_assert(thumbnail->level_count <= MAX_LEVELS);
 
-	for (level = thumbnail->level_count - 1; level >= 0; level--)
-		if (vips_thumbnail_calculate_common_shrink(thumbnail,
+	for (level = thumbnail->level_count - 1; level >= 0; level--) {
+		double shrink = vips_thumbnail_calculate_common_shrink(thumbnail,
 				thumbnail->level_width[level],
-				thumbnail->level_height[level]) >= 1.0)
+				thumbnail->level_height[level]);
+
+		// not >=, shrink can clip to 1.0
+		if (shrink > 1.0)
 			return level;
+	}
 
 	return 0;
 }
@@ -587,16 +596,23 @@ vips_thumbnail_open(VipsThumbnail *thumbnail)
 
 	factor = 1.0;
 
-	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader))
+	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader) ||
+		vips_isprefix("VipsForeignLoadUhdr", thumbnail->loader)) {
 		factor = vips_thumbnail_find_jpegshrink(thumbnail,
 			thumbnail->input_width, thumbnail->input_height);
+		g_info("loading with factor %g pre-shrink", factor);
+	}
 	else if (vips_isprefix("VipsForeignLoadTiff", thumbnail->loader) ||
 		vips_isprefix("VipsForeignLoadJp2k", thumbnail->loader) ||
 		vips_isprefix("VipsForeignLoadOpenslide", thumbnail->loader)) {
-		if (thumbnail->level_count > 0)
+		if (thumbnail->level_count > 0) {
 			factor = vips_thumbnail_find_pyrlevel(thumbnail,
 				thumbnail->input_width,
 				thumbnail->input_height);
+			g_info("loading pyramid page %g", factor);
+		}
+		else
+			g_info("loading with factor %g pre-shrink", factor);
 	}
 	else if (vips_isprefix("VipsForeignLoadWebp", thumbnail->loader)) {
 		factor = vips_thumbnail_calculate_common_shrink(thumbnail,
@@ -606,12 +622,17 @@ vips_thumbnail_open(VipsThumbnail *thumbnail)
 		/* Avoid upsizing via libwebp.
 		 */
 		factor = VIPS_MAX(1.0, factor);
+
+		g_info("loading with factor %g pre-shrink", factor);
 	}
 	else if (vips_isprefix("VipsForeignLoadPdf", thumbnail->loader) ||
-		vips_isprefix("VipsForeignLoadSvg", thumbnail->loader))
+		vips_isprefix("VipsForeignLoadSvg", thumbnail->loader)) {
 		factor = vips_thumbnail_calculate_common_shrink(thumbnail,
 			thumbnail->input_width,
 			thumbnail->page_height);
+
+		g_info("loading with factor %g pre-shrink", factor);
+	}
 	else if (vips_isprefix("VipsForeignLoadHeif", thumbnail->loader)) {
 		/* 'factor' is a gboolean which enables thumbnail load instead
 		 * of image load.
@@ -628,9 +649,12 @@ vips_thumbnail_open(VipsThumbnail *thumbnail)
 			thumbnail->heif_thumbnail_height);
 
 		factor = shrink_factor > 1.0 ? 1 : 0;
-	}
 
-	g_info("loading with factor %g pre-shrink", factor);
+		if (factor == 1)
+			g_info("selected HEIF thumbnail for shrinking");
+		else
+			g_info("selected main HEIF image for shrinking");
+	}
 
 	if (!(im = class->open(thumbnail, factor)))
 		return NULL;
@@ -644,12 +668,13 @@ static int
 vips_thumbnail_build(VipsObject *object)
 {
 	VipsThumbnail *thumbnail = VIPS_THUMBNAIL(object);
-	VipsImage **t = (VipsImage **) vips_object_local_array(object, 15);
+	VipsImage **t = (VipsImage **) vips_object_local_array(object, 20);
 
 	VipsImage *in;
 	int preshrunk_page_height;
 	double hshrink;
 	double vshrink;
+	VipsImage *gainmap;
 
 	/* TRUE if we've done the import of an ICC transform and still need to
 	 * export.
@@ -680,10 +705,10 @@ vips_thumbnail_build(VipsObject *object)
 	 * auto_rotate.
 	 */
 	if (vips_object_argument_isset(object, "no_rotate"))
-		thumbnail->auto_rotate = !thumbnail->no_rotate;
+		thumbnail->auto_rotate = !thumbnail->no_rotate; // FIXME: Invalidates operation cache
 
 	if (!vips_object_argument_isset(object, "height"))
-		thumbnail->height = thumbnail->width;
+		thumbnail->height = thumbnail->width; // FIXME: Invalidates operation cache
 
 	/* Open and do any pre-shrinking.
 	 */
@@ -695,8 +720,8 @@ vips_thumbnail_build(VipsObject *object)
 	 */
 	preshrunk_page_height = vips_image_get_page_height(in);
 
-	needs_icc_transform = thumbnail->export_profile &&
-		(thumbnail->import_profile ||
+	needs_icc_transform = thumbnail->output_profile &&
+		(thumbnail->input_profile ||
 			vips_image_get_typeof(in, VIPS_META_ICC_NAME));
 
 	/* RAD needs special unpacking.
@@ -716,20 +741,20 @@ vips_thumbnail_build(VipsObject *object)
 	 */
 	have_imported = FALSE;
 	if (thumbnail->linear) {
-		/* If we are doing colour management (there's an import
+		/* If we are doing colour management (there's an input
 		 * profile), then we can use XYZ PCS as the resize space.
 		 */
 		if (in->Coding == VIPS_CODING_NONE &&
 			(in->BandFmt == VIPS_FORMAT_UCHAR ||
 				in->BandFmt == VIPS_FORMAT_USHORT) &&
 			(vips_image_get_typeof(in, VIPS_META_ICC_NAME) ||
-				thumbnail->import_profile)) {
+				thumbnail->input_profile)) {
 			g_info("importing to XYZ PCS");
-			if (thumbnail->import_profile)
-				g_info("fallback input profile %s", thumbnail->import_profile);
+			if (thumbnail->input_profile)
+				g_info("fallback input profile %s", thumbnail->input_profile);
 
 			if (vips_icc_import(in, &t[2],
-					"input_profile", thumbnail->import_profile,
+					"input_profile", thumbnail->input_profile,
 					"embedded", TRUE,
 					"intent", thumbnail->intent,
 					"pcs", VIPS_PCS_XYZ,
@@ -783,7 +808,7 @@ vips_thumbnail_build(VipsObject *object)
 	 * page_height or we'll have pixels straddling page boundaries.
 	 */
 	if (in->Ysize > preshrunk_page_height) {
-		int target_page_height = VIPS_RINT(preshrunk_page_height / vshrink);
+		int target_page_height = rint(preshrunk_page_height / vshrink);
 		int target_image_height =
 			target_page_height * thumbnail->n_loaded_pages;
 
@@ -815,6 +840,25 @@ vips_thumbnail_build(VipsObject *object)
 		return -1;
 	in = t[5];
 
+	/* Also resize the gainmap, if any.
+	 */
+	if ((gainmap = vips_image_get_gainmap(in))) {
+		if (vips_resize(gainmap, &t[15], 1.0 / hshrink,
+			"vscale", 1.0 / vshrink,
+			"kernel", VIPS_KERNEL_LINEAR,
+			NULL))
+			return -1;
+		g_object_unref(gainmap);
+
+		/* Make sure we don't have a shared image.
+		 */
+		if (vips_copy(in, &t[8], NULL))
+			return -1;
+		in = t[8];
+
+		vips_image_set_image(in, "gainmap", t[15]);
+	}
+
 	if (unpremultiplied_format != VIPS_FORMAT_NOTSET) {
 		g_info("unpremultiplying alpha");
 		if (vips_unpremultiply(in, &t[6], NULL) ||
@@ -827,8 +871,10 @@ vips_thumbnail_build(VipsObject *object)
 	 * accidentally turn into an animated image later.
 	 */
 	if (thumbnail->n_loaded_pages > 1) {
-		int output_page_height = VIPS_RINT(preshrunk_page_height / vshrink);
+		int output_page_height = rint(preshrunk_page_height / vshrink);
 
+		/* Make sure we don't have a shared image.
+		 */
 		if (vips_copy(in, &t[8], NULL))
 			return -1;
 		in = t[8];
@@ -844,11 +890,11 @@ vips_thumbnail_build(VipsObject *object)
 	if (have_imported) {
 		/* We are in PCS. Export with the output profile, if any (this
 		 * will export with the embedded input profile if there's no
-		 * export profile).
+		 * output profile).
 		 */
 		g_info("exporting to device space with a profile");
 		if (vips_icc_export(in, &t[9],
-				"output_profile", thumbnail->export_profile,
+				"output_profile", thumbnail->output_profile,
 				"intent", thumbnail->intent,
 				"depth", 8,
 				NULL))
@@ -859,8 +905,8 @@ vips_thumbnail_build(VipsObject *object)
 		/* We can transform to the output with a pair of ICC profiles.
 		 */
 		g_info("transforming with supplied profiles");
-		if (vips_icc_transform(in, &t[9], thumbnail->export_profile,
-				"input_profile", thumbnail->import_profile,
+		if (vips_icc_transform(in, &t[9], thumbnail->output_profile,
+				"input_profile", thumbnail->input_profile,
 				"intent", thumbnail->intent,
 				"embedded", TRUE,
 				"depth", 8,
@@ -869,14 +915,14 @@ vips_thumbnail_build(VipsObject *object)
 
 		in = t[9];
 	}
-	else if (thumbnail->export_profile) {
+	else if (thumbnail->output_profile) {
 		/* We are in one of the resize space (sRGB, scRGB, B_W, GREY16, etc.)
 		 * and need to go to PCS, then export.
 		 */
-		g_info("exporting with %s", thumbnail->export_profile);
+		g_info("exporting with %s", thumbnail->output_profile);
 		if (vips_colourspace(in, &t[9], VIPS_INTERPRETATION_XYZ, NULL) ||
 			vips_icc_export(t[9], &t[10],
-				"output_profile", thumbnail->export_profile,
+				"output_profile", thumbnail->output_profile,
 				"intent", thumbnail->intent,
 				"depth", 8,
 				NULL))
@@ -885,7 +931,7 @@ vips_thumbnail_build(VipsObject *object)
 	}
 	else if (thumbnail->linear) {
 		/* We are in one of the scRGB or GREY16 spaces and there's
-		 * no export profile. Output to sRGB or B_W.
+		 * no output profile. Output to sRGB or B_W.
 		 */
 		VipsInterpretation interpretation;
 
@@ -910,6 +956,18 @@ vips_thumbnail_build(VipsObject *object)
 			vips_autorot(t[11], &t[12], NULL))
 			return -1;
 		in = t[12];
+
+		/* Also rotate the gainmap, if any.
+		 */
+		if ((gainmap = vips_image_get_gainmap(in))) {
+			vips_image_set_int(gainmap,
+				VIPS_META_ORIENTATION, thumbnail->orientation);
+			if (vips_autorot(gainmap, &t[17], NULL))
+				return -1;
+			g_object_unref(gainmap);
+
+			vips_image_set_image(in, "gainmap", t[17]);
+		}
 	}
 
 	/* Crop after rotate so we don't need to rotate the crop box.
@@ -920,6 +978,8 @@ vips_thumbnail_build(VipsObject *object)
 		 */
 		int crop_width = VIPS_MIN(thumbnail->width, in->Xsize);
 		int crop_height = VIPS_MIN(thumbnail->height, in->Ysize);
+		int original_width = in->Xsize;
+		int original_height = in->Ysize;
 
 		g_info("cropping to %dx%d", crop_width, crop_height);
 
@@ -933,6 +993,25 @@ vips_thumbnail_build(VipsObject *object)
 				NULL))
 			return -1;
 		in = t[14];
+
+		int crop_left = -vips_image_get_xoffset(in);
+		int crop_top = -vips_image_get_yoffset(in);
+
+		/* Also crop the gainmap, if any.
+		 */
+		if ((gainmap = vips_image_get_gainmap(in))) {
+			double xscale = (double) gainmap->Xsize / original_width;
+			double yscale = (double) gainmap->Ysize / original_height;
+
+			if (vips_crop(gainmap, &t[16],
+					crop_left * xscale, crop_top * yscale,
+					crop_width * xscale, crop_height * yscale,
+					NULL))
+				return -1;
+			g_object_unref(gainmap);
+
+			vips_image_set_image(in, "gainmap", t[16]);
+		}
 	}
 
 	g_object_set(thumbnail, "out", vips_image_new(), NULL);
@@ -1012,18 +1091,18 @@ vips_thumbnail_class_init(VipsThumbnailClass *class)
 		G_STRUCT_OFFSET(VipsThumbnail, linear),
 		FALSE);
 
-	VIPS_ARG_STRING(class, "import_profile", 118,
-		_("Import profile"),
-		_("Fallback import profile"),
+	VIPS_ARG_STRING(class, "input_profile", 118,
+		_("Input profile"),
+		_("Fallback input profile"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsThumbnail, import_profile),
+		G_STRUCT_OFFSET(VipsThumbnail, input_profile),
 		NULL);
 
-	VIPS_ARG_STRING(class, "export_profile", 119,
-		_("Export profile"),
-		_("Fallback export profile"),
+	VIPS_ARG_STRING(class, "output_profile", 119,
+		_("Output profile"),
+		_("Fallback output profile"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsThumbnail, export_profile),
+		G_STRUCT_OFFSET(VipsThumbnail, output_profile),
 		NULL);
 
 	VIPS_ARG_ENUM(class, "intent", 120,
@@ -1046,12 +1125,30 @@ vips_thumbnail_class_init(VipsThumbnailClass *class)
 	 * This is now replaced (though still functional) with "no-rotate",
 	 * see above.
 	 */
-	VIPS_ARG_BOOL(class, "auto_rotate", 121,
+	VIPS_ARG_BOOL(class, "auto_rotate", 130,
 		_("Auto rotate"),
 		_("Use orientation tags to rotate image upright"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT | VIPS_ARGUMENT_DEPRECATED,
 		G_STRUCT_OFFSET(VipsThumbnail, auto_rotate),
 		TRUE);
+
+	/* Renamed as input-profile and output-profile for consistency with the
+	 * rest of the API.
+	 */
+
+	VIPS_ARG_STRING(class, "import_profile", 131,
+		_("Import profile"),
+		_("Fallback import profile"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT | VIPS_ARGUMENT_DEPRECATED,
+		G_STRUCT_OFFSET(VipsThumbnail, input_profile),
+		NULL);
+
+	VIPS_ARG_STRING(class, "export_profile", 132,
+		_("Export profile"),
+		_("Fallback export profile"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT | VIPS_ARGUMENT_DEPRECATED,
+		G_STRUCT_OFFSET(VipsThumbnail, output_profile),
+		NULL);
 }
 
 static void
@@ -1104,7 +1201,8 @@ vips_thumbnail_file_open(VipsThumbnail *thumbnail, double factor)
 {
 	VipsThumbnailFile *file = (VipsThumbnailFile *) thumbnail;
 
-	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader)) {
+	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader) ||
+		vips_isprefix("VipsForeignLoadUhdr", thumbnail->loader)) {
 		return vips_image_new_from_file(file->filename,
 			"access", VIPS_ACCESS_SEQUENTIAL,
 			"fail_on", thumbnail->fail_on,
@@ -1212,28 +1310,18 @@ vips_thumbnail_file_init(VipsThumbnailFile *file)
  * @filename: file to read from
  * @out: (out): output image
  * @width: target width in pixels
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Make a thumbnail from a file.
  *
- * * @height: %gint, target height in pixels
- * * @size: #VipsSize, upsize, downsize, both or force
- * * @no_rotate: %gboolean, don't rotate upright using orientation tag
- * * @crop: #VipsInteresting, shrink and crop to fill target
- * * @linear: %gboolean, perform shrink in linear light
- * * @import_profile: %gchararray, fallback import ICC profile
- * * @export_profile: %gchararray, export ICC profile
- * * @intent: #VipsIntent, rendering intent
- * * @fail_on: #VipsFailOn, load error types to fail on
- *
- * Make a thumbnail from a file. Shrinking is done in three stages: using any
- * shrink-on-load features available in the file import library, using a block
+ * Shrinking is done in three stages: using any
+ * shrink-on-load features available in the image load library, using a block
  * shrink, and using a lanczos3 shrink. At least the final 200% is done with
  * lanczos3. The output should be high quality, and the operation should be
  * quick.
  *
- * See vips_thumbnail_buffer() to thumbnail from a memory buffer, or
- * vips_thumbnail_source() to thumbnail from an arbitrary byte source.
+ * See [ctor@Image.thumbnail_buffer] to thumbnail from a memory buffer, or
+ * [ctor@Image.thumbnail_source] to thumbnail from an arbitrary byte source.
  *
  * By default, libvips will only use the first frame of animated or multipage
  * images. To thumbnail all pages or frames, pass `n=-1` to the loader in
@@ -1244,21 +1332,19 @@ vips_thumbnail_file_init(VipsThumbnailFile *file)
  * @height to a very large number to ignore that dimension.
  *
  * If you set @crop, then the output image will fill the whole of the @width x
- * @height rectangle, with any excess cropped away. See vips_smartcrop() for
+ * @height rectangle, with any excess cropped away. See [method@Image.smartcrop] for
  * details on the cropping strategy.
  *
  * Normally the operation will upsize or downsize as required to fit the image
- * inside or outside the target size. If @size is set
- * to #VIPS_SIZE_UP, the operation will only upsize and will just
- * copy if asked to downsize.
- * If @size is set
- * to #VIPS_SIZE_DOWN, the operation will only downsize and will just
- * copy if asked to upsize.
- * If @size is #VIPS_SIZE_FORCE, the image aspect ratio will be broken and the
- * image will be forced to fit the target.
+ * inside or outside the target size. If @size is set to [enum@Vips.Size.UP],
+ * the operation will only upsize and will just copy if asked to downsize.
+ * If @size is set to [enum@Vips.Size.DOWN], the operation will only downsize
+ * and will just copy if asked to upsize.
+ * If @size is [enum@Vips.Size.FORCE], the image aspect ratio will be broken
+ * and the image will be forced to fit the target.
  *
  * Normally any orientation tags on the input image (such as EXIF tags) are
- * interpreted to rotate the image upright. If you set @no_rotate to %TRUE,
+ * interpreted to rotate the image upright. If you set @no_rotate to `TRUE`,
  * these tags will not be interpreted.
  *
  * Shrinking is normally done in sRGB colourspace. Set @linear to shrink in
@@ -1266,19 +1352,31 @@ vips_thumbnail_file_init(VipsThumbnailFile *file)
  * also be far slower, since tricks like JPEG shrink-on-load cannot be used in
  * linear space.
  *
- * If you set @export_profile to the filename of an ICC profile, the image
+ * If you set @output_profile to the filename of an ICC profile, the image
  * will be transformed to the target colourspace before writing to the
- * output. You can also give an @import_profile which will be used if the
+ * output. You can also give an @input_profile which will be used if the
  * input image has no ICC profile, or if the profile embedded in the
  * input image is broken.
  *
  * Use @intent to set the rendering intent for any ICC transform. The default
- * is #VIPS_INTENT_RELATIVE.
+ * is [enum@Vips.Intent.RELATIVE].
  *
  * Use @fail_on to control the types of error that will cause loading to fail.
- * The default is #VIPS_FAIL_ON_NONE, ie. thumbnail is permissive.
+ * The default is [enum@Vips.FailOn.NONE], ie. thumbnail is permissive.
  *
- * See also: vips_thumbnail_buffer().
+ * ::: tip "Optional arguments"
+ *     * @height: `gint`, target height in pixels
+ *     * @size: [enum@Size], upsize, downsize, both or force
+ *     * @no_rotate: `gboolean`, don't rotate upright using orientation tag
+ *     * @crop: [enum@Interesting], shrink and crop to fill target
+ *     * @linear: `gboolean`, perform shrink in linear light
+ *     * @input_profile: `gchararray`, fallback input ICC profile
+ *     * @output_profile: `gchararray`, output ICC profile
+ *     * @intent: [enum@Intent], rendering intent
+ *     * @fail_on: [enum@FailOn], load error types to fail on
+ *
+ * ::: seealso
+ *     [ctor@Image.thumbnail_buffer].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1339,7 +1437,8 @@ vips_thumbnail_buffer_open(VipsThumbnail *thumbnail, double factor)
 {
 	VipsThumbnailBuffer *buffer = (VipsThumbnailBuffer *) thumbnail;
 
-	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader)) {
+	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader) ||
+		vips_isprefix("VipsForeignLoadUhdr", thumbnail->loader)) {
 		return vips_image_new_from_buffer(
 			buffer->buf->data, buffer->buf->length,
 			buffer->option_string,
@@ -1467,26 +1566,27 @@ vips_thumbnail_buffer_init(VipsThumbnailBuffer *buffer)
  * @len: (type gsize): size of memory area
  * @out: (out): output image
  * @width: target width in pixels
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Exactly as [ctor@Image.thumbnail], but read from a memory buffer.
  *
- * * @height: %gint, target height in pixels
- * * @size: #VipsSize, upsize, downsize, both or force
- * * @no_rotate: %gboolean, don't rotate upright using orientation tag
- * * @crop: #VipsInteresting, shrink and crop to fill target
- * * @linear: %gboolean, perform shrink in linear light
- * * @import_profile: %gchararray, fallback import ICC profile
- * * @export_profile: %gchararray, export ICC profile
- * * @intent: #VipsIntent, rendering intent
- * * @fail_on: #VipsFailOn, load error types to fail on
- * * @option_string: %gchararray, extra loader options
+ * One extra optional argument, @option_string, lets you pass options to the
+ * underlying loader.
  *
- * Exactly as vips_thumbnail(), but read from a memory buffer. One extra
- * optional argument, @option_string, lets you pass options to the underlying
- * loader.
+ * ::: tip "Optional arguments"
+ *     * @height: `gint`, target height in pixels
+ *     * @size: [enum@Size], upsize, downsize, both or force
+ *     * @no_rotate: `gboolean`, don't rotate upright using orientation tag
+ *     * @crop: [enum@Interesting], shrink and crop to fill target
+ *     * @linear: `gboolean`, perform shrink in linear light
+ *     * @input_profile: `gchararray`, fallback input ICC profile
+ *     * @output_profile: `gchararray`, output ICC profile
+ *     * @intent: [enum@Intent], rendering intent
+ *     * @fail_on: [enum@FailOn], load error types to fail on
+ *     * @option_string: `gchararray`, extra loader options
  *
- * See also: vips_thumbnail().
+ * ::: seealso
+ *     [ctor@Image.thumbnail].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1533,7 +1633,7 @@ vips_thumbnail_source_get_info(VipsThumbnail *thumbnail)
 
 	g_info("thumbnailing source");
 
-	if (!(thumbnail->loader = vips_foreign_find_load_source( source->source)) ||
+	if (!(thumbnail->loader = vips_foreign_find_load_source(source->source)) ||
 		!(image = vips_image_new_from_source(source->source,
 			  source->option_string, NULL)))
 		return -1;
@@ -1552,7 +1652,8 @@ vips_thumbnail_source_open(VipsThumbnail *thumbnail, double factor)
 {
 	VipsThumbnailSource *source = (VipsThumbnailSource *) thumbnail;
 
-	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader)) {
+	if (vips_isprefix("VipsForeignLoadJpeg", thumbnail->loader) ||
+		vips_isprefix("VipsForeignLoadUhdr", thumbnail->loader)) {
 		return vips_image_new_from_source(
 			source->source,
 			source->option_string,
@@ -1560,8 +1661,7 @@ vips_thumbnail_source_open(VipsThumbnail *thumbnail, double factor)
 			"shrink", (int) factor,
 			NULL);
 	}
-	else if (vips_isprefix("VipsForeignLoadOpenslide",
-				 thumbnail->loader)) {
+	else if (vips_isprefix("VipsForeignLoadOpenslide", thumbnail->loader)) {
 		return vips_image_new_from_source(
 			source->source,
 			source->option_string,
@@ -1679,26 +1779,28 @@ vips_thumbnail_source_init(VipsThumbnailSource *source)
  * @source: source to thumbnail
  * @out: (out): output image
  * @width: target width in pixels
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Exactly as [ctor@Image.thumbnail], but read from a source.
  *
- * * @height: %gint, target height in pixels
- * * @size: #VipsSize, upsize, downsize, both or force
- * * @no_rotate: %gboolean, don't rotate upright using orientation tag
- * * @crop: #VipsInteresting, shrink and crop to fill target
- * * @linear: %gboolean, perform shrink in linear light
- * * @import_profile: %gchararray, fallback import ICC profile
- * * @export_profile: %gchararray, export ICC profile
- * * @intent: #VipsIntent, rendering intent
- * * @fail_on: #VipsFailOn, load error types to fail on
- * * @option_string: %gchararray, extra loader options
- *
- * Exactly as vips_thumbnail(), but read from a source. One extra
+ * One extra
  * optional argument, @option_string, lets you pass options to the underlying
  * loader.
  *
- * See also: vips_thumbnail().
+ * ::: tip "Optional arguments"
+ *     * @height: `gint`, target height in pixels
+ *     * @size: [enum@Size], upsize, downsize, both or force
+ *     * @no_rotate: `gboolean`, don't rotate upright using orientation tag
+ *     * @crop: [enum@Interesting], shrink and crop to fill target
+ *     * @linear: `gboolean`, perform shrink in linear light
+ *     * @input_profile: `gchararray`, fallback input ICC profile
+ *     * @output_profile: `gchararray`, output ICC profile
+ *     * @intent: [enum@Intent], rendering intent
+ *     * @fail_on: [enum@FailOn], load error types to fail on
+ *     * @option_string: `gchararray`, extra loader options
+ *
+ * ::: seealso
+ *     [ctor@Image.thumbnail].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1748,18 +1850,10 @@ static VipsImage *
 vips_thumbnail_image_open(VipsThumbnail *thumbnail, double factor)
 {
 	VipsThumbnailImage *image = (VipsThumbnailImage *) thumbnail;
-	VipsImage **t = (VipsImage **)
-		vips_object_local_array(VIPS_OBJECT(thumbnail), 1);
 
-	/* We want thumbnail to run in sequential mode on this image, or we
-	 * may get horrible cache thrashing.
-	 */
-	if (vips_sequential(image->in, &t[0], "tile-height", 16, NULL))
-		return NULL;
+	g_object_ref(image->in);
 
-	g_object_ref(t[0]);
-
-	return t[0];
+	return image->in;
 }
 
 static void
@@ -1767,6 +1861,7 @@ vips_thumbnail_image_class_init(VipsThumbnailClass *class)
 {
 	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
 	VipsObjectClass *vobject_class = VIPS_OBJECT_CLASS(class);
+	VipsOperationClass *operation_class = VIPS_OPERATION_CLASS(class);
 	VipsThumbnailClass *thumbnail_class = VIPS_THUMBNAIL_CLASS(class);
 
 	gobject_class->set_property = vips_object_set_property;
@@ -1774,6 +1869,8 @@ vips_thumbnail_image_class_init(VipsThumbnailClass *class)
 
 	vobject_class->nickname = "thumbnail_image";
 	vobject_class->description = _("generate thumbnail from image");
+
+	operation_class->flags = VIPS_OPERATION_SEQUENTIAL;
 
 	thumbnail_class->get_info = vips_thumbnail_image_get_info;
 	thumbnail_class->open = vips_thumbnail_image_open;
@@ -1795,28 +1892,28 @@ vips_thumbnail_image_init(VipsThumbnailImage *image)
  * @in: input image
  * @out: (out): output image
  * @width: target width in pixels
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
- *
- * * @height: %gint, target height in pixels
- * * @size: #VipsSize, upsize, downsize, both or force
- * * @no_rotate: %gboolean, don't rotate upright using orientation tag
- * * @crop: #VipsInteresting, shrink and crop to fill target
- * * @linear: %gboolean, perform shrink in linear light
- * * @import_profile: %gchararray, fallback import ICC profile
- * * @export_profile: %gchararray, export ICC profile
- * * @intent: #VipsIntent, rendering intent
- * * @fail_on: #VipsFailOn, load error types to fail on
- *
- * Exactly as vips_thumbnail(), but read from an existing image.
+ * Exactly as [ctor@Image.thumbnail], but read from an existing image.
  *
  * This operation
  * is not able to exploit shrink-on-load features of image load libraries, so
- * it can be much slower than `vips_thumbnail()` and produce poorer quality
- * output. Only use it if you really have to.
+ * it can be much slower than [ctor@Image.thumbnail] and produce poorer quality
+ * output. Only use this operation if you really have to.
  *
- * See also: vips_thumbnail().
+ * ::: tip "Optional arguments"
+ *     * @height: `gint`, target height in pixels
+ *     * @size: [enum@Size], upsize, downsize, both or force
+ *     * @no_rotate: `gboolean`, don't rotate upright using orientation tag
+ *     * @crop: [enum@Interesting], shrink and crop to fill target
+ *     * @linear: `gboolean`, perform shrink in linear light
+ *     * @input_profile: `gchararray`, fallback input ICC profile
+ *     * @output_profile: `gchararray`, output ICC profile
+ *     * @intent: [enum@Intent], rendering intent
+ *     * @fail_on: [enum@FailOn], load error types to fail on
+ *
+ * ::: seealso
+ *     [ctor@Image.thumbnail].
  *
  * Returns: 0 on success, -1 on error.
  */

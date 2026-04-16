@@ -90,7 +90,7 @@ G_DEFINE_TYPE(VipsFastcor, vips_fastcor, VIPS_TYPE_CORRELATION);
 						for (i = b; i < sz; i += bands) { \
 							int t = p1[i] - p2[i]; \
 \
-							sum += t * t; \
+							sum += (unsigned int) t * t; \
 						} \
 \
 						p1 += sz; \
@@ -231,7 +231,7 @@ vips_fastcor_init(VipsFastcor *fastcor)
  * @in: input image
  * @ref: reference image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Calculate a fast correlation surface.
  *
@@ -252,7 +252,8 @@ vips_fastcor_init(VipsFastcor *fastcor)
  * In other words, the output type is just large enough to hold the whole
  * range of possible values.
  *
- * See also: vips_spcor().
+ * ::: seealso
+ *     [method@Image.spcor].
  *
  * Returns: 0 on success, -1 on error
  */

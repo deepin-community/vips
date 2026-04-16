@@ -106,9 +106,10 @@
  * @VIPS_INTENT_RELATIVE: relative colorimetric rendering intent
  * @VIPS_INTENT_SATURATION: saturation rendering intent
  * @VIPS_INTENT_ABSOLUTE: absolute colorimetric rendering intent
+ * @VIPS_INTENT_AUTO: the rendering intent that the profile suggests
  *
- * The rendering intent. #VIPS_INTENT_ABSOLUTE is best for
- * scientific work, #VIPS_INTENT_RELATIVE is usually best for
+ * The rendering intent. [enum@Vips.Intent.ABSOLUTE] is best for
+ * scientific work, [enum@Vips.Intent.RELATIVE] is usually best for
  * accurate communication with other imaging libraries.
  */
 
@@ -117,8 +118,8 @@
  * @VIPS_PCS_LAB: use CIELAB D65 as the Profile Connection Space
  * @VIPS_PCS_XYZ: use XYZ as the Profile Connection Space
  *
- * Pick a Profile Connection Space for vips_icc_import() and
- * vips_icc_export(). LAB is usually best, XYZ can be more convenient in some
+ * Pick a Profile Connection Space for [method@Image.icc_import] and
+ * [method@Image.icc_export]. LAB is usually best, XYZ can be more convenient in some
  * cases.
  */
 
@@ -553,43 +554,16 @@ vips_icc_print_profile(const char *name, cmsHPROFILE profile)
 static gboolean
 vips_image_is_profile_compatible(VipsImage *image, int profile_bands)
 {
-	switch (image->Type) {
-	case VIPS_INTERPRETATION_B_W:
-	case VIPS_INTERPRETATION_GREY16:
-		/* The ICC profile needs to be monochrome.
-		 */
-		return profile_bands == 1;
+	int bands = vips_interpretation_bands(image->Type);
 
-	case VIPS_INTERPRETATION_XYZ:
-	case VIPS_INTERPRETATION_LAB:
-	case VIPS_INTERPRETATION_LABQ:
-	case VIPS_INTERPRETATION_RGB:
-	case VIPS_INTERPRETATION_CMC:
-	case VIPS_INTERPRETATION_LCH:
-	case VIPS_INTERPRETATION_LABS:
-	case VIPS_INTERPRETATION_sRGB:
-	case VIPS_INTERPRETATION_YXY:
-	case VIPS_INTERPRETATION_RGB16:
-	case VIPS_INTERPRETATION_scRGB:
-	case VIPS_INTERPRETATION_HSV:
-		/* The band count in the ICC profile must correspond to that of
-		 * the image, with a maximum of 3 bands allowed.
-		 */
-		return VIPS_MIN(3, image->Bands) == profile_bands;
-
-	case VIPS_INTERPRETATION_CMYK:
-		/* CMYK images can only be imported if the ICC-profile has at
-		 * least 4 bands thereby blocking the usage of RGB profiles.
-		 */
+	// CMYK can mean more than 4 bands for eg. hexachrome
+	if (image->Type == VIPS_INTERPRETATION_CMYK)
 		return profile_bands >= 4;
 
-	case VIPS_INTERPRETATION_MULTIBAND:
-	case VIPS_INTERPRETATION_HISTOGRAM:
-	case VIPS_INTERPRETATION_MATRIX:
-	case VIPS_INTERPRETATION_FOURIER:
-	default:
+	if (bands > 0)
+		return bands == profile_bands;
+	else
 		return image->Bands >= profile_bands;
-	}
 }
 
 /* Load a profile from a blob and check compatibility with image, intent and
@@ -608,28 +582,36 @@ vips_icc_load_profile_blob(VipsIcc *icc, VipsBlob *blob,
 
 #ifdef DEBUG
 	printf("loading %s profile, intent %s, from blob %p\n",
-		direction == LCMS_USED_AS_INPUT ? _("input") : _("output"),
+		direction == LCMS_USED_AS_INPUT ? "input" : "output",
 		vips_enum_nick(VIPS_TYPE_INTENT, icc->intent),
 		blob);
 #endif /*DEBUG*/
 
 	data = vips_blob_get(blob, &size);
 	if (!(profile = cmsOpenProfileFromMem(data, size))) {
-		g_warning("%s", _("corrupt profile"));
+		g_warning("corrupt profile");
 		return NULL;
 	}
 
 	icc->selected_intent = icc->intent;
-	if (!cmsIsIntentSupported(profile, icc->intent, direction)) {
-		icc->selected_intent = (VipsIntent) cmsGetHeaderRenderingIntent(
-			profile);
+	if (icc->intent == VIPS_INTENT_AUTO ||
+		!cmsIsIntentSupported(profile, icc->intent, direction)) {
+		cmsUInt32Number intent = cmsGetHeaderRenderingIntent(profile);
+		if (intent > VIPS_INTENT_ABSOLUTE) {
+			VIPS_FREEF(cmsCloseProfile, profile);
+			g_warning("corrupt profile");
+			return NULL;
+		}
+		icc->selected_intent = (VipsIntent) intent;
+	}
 
-		g_warning(_("fallback to suggested %s intent, as profile "
-					"does not support %s %s intent"),
+	if (icc->intent != VIPS_INTENT_AUTO &&
+		icc->selected_intent != icc->intent)
+		g_warning("fallback to suggested %s intent, as profile "
+				  "does not support %s %s intent",
 			vips_enum_nick(VIPS_TYPE_INTENT, icc->selected_intent),
 			vips_enum_nick(VIPS_TYPE_INTENT, icc->intent),
-			direction == LCMS_USED_AS_INPUT ? _("input") : _("output"));
-	}
+			direction == LCMS_USED_AS_INPUT ? "input" : "output");
 
 #ifdef DEBUG
 	vips_icc_print_profile("loaded from blob to make", profile);
@@ -637,22 +619,22 @@ vips_icc_load_profile_blob(VipsIcc *icc, VipsBlob *blob,
 
 	if (!(info = vips_icc_info(cmsGetColorSpace(profile)))) {
 		VIPS_FREEF(cmsCloseProfile, profile);
-		g_warning("%s", _("unsupported profile"));
+		g_warning("unsupported profile");
 		return NULL;
 	}
 
 	if (image &&
 		!vips_image_is_profile_compatible(image, info->bands)) {
 		VIPS_FREEF(cmsCloseProfile, profile);
-		g_warning("%s", _("profile incompatible with image"));
+		g_warning("profile incompatible with image");
 		return NULL;
 	}
 
 	if (!cmsIsIntentSupported(profile, icc->selected_intent, direction)) {
 		VIPS_FREEF(cmsCloseProfile, profile);
-		g_warning(_("profile does not support %s %s intent"),
+		g_warning("profile does not support %s %s intent",
 			vips_enum_nick(VIPS_TYPE_INTENT, icc->selected_intent),
-			direction == LCMS_USED_AS_INPUT ? _("input") : _("output"));
+			direction == LCMS_USED_AS_INPUT ? "input" : "output");
 		return NULL;
 	}
 
@@ -684,11 +666,12 @@ vips_icc_verify_blob(VipsIcc *icc, VipsBlob **blob)
 
 /* Try to set the import profile. We read the input profile like this:
  *
- *	embedded	filename	action
- *	0		0 		image
- *	1		0		image
- *	0		1		file
- *	1		1		image, then fall back to file
+ * | embedded | filename | action                        |
+ * |----------|----------|-------------------------------|
+ * | 0        | 0        | image                         |
+ * | 1        | 0        | image                         |
+ * | 0        | 1        | file                          |
+ * | 1        | 1        | image, then fall back to file |
  *
  * If averything fails, we fall back to one of our built-in profiles,
  * depending on the input image.
@@ -897,18 +880,18 @@ decode_xyz(guint16 *fixed, float *xyz, int n)
 		Z *= SCALE;
 
 		/* Transform XYZ D50 to D65, chromatic adaption is done with the
-		 * Bradford transformation.
-		 * See: https://fujiwaratko.sakura.ne.jp/infosci/colorspace/bradford_e.html
+		 * Bradford transformation. See:
+		 * https://fujiwaratko.sakura.ne.jp/infosci/colorspace/bradford_e.html
 		 */
-		xyz[0] = 0.955513 * X +
-			-0.023073 * Y +
-			0.063309 * Z;
-		xyz[1] = -0.028325 * X +
-			1.009942 * Y +
-			0.021055 * Z;
-		xyz[2] = 0.012329 * X +
-			-0.020536 * Y +
-			1.330714 * Z;
+		xyz[0] = 0.955513F * X +
+			-0.023073F * Y +
+			0.063309F * Z;
+		xyz[1] = -0.028325F * X +
+			1.009942F * Y +
+			0.021055F * Z;
+		xyz[2] = 0.012329F * X +
+			-0.020536F * Y +
+			1.330714F * Z;
 
 		xyz += 3;
 		fixed += 3;
@@ -918,8 +901,7 @@ decode_xyz(guint16 *fixed, float *xyz, int n)
 /* Process a buffer of data.
  */
 static void
-vips_icc_import_line(VipsColour *colour,
-	VipsPel *out, VipsPel **in, int width)
+vips_icc_import_line(VipsColour *colour, VipsPel *out, VipsPel **in, int width)
 {
 	VipsIcc *icc = (VipsIcc *) colour;
 
@@ -927,7 +909,7 @@ vips_icc_import_line(VipsColour *colour,
 	float *q;
 	int i;
 
-	/* Buffer of encoded 16-bit pixels we transform.
+	/* Transform to PCS pixels here.
 	 */
 	guint16 encoded[3 * PIXEL_BUFFER_SIZE];
 
@@ -1014,7 +996,7 @@ vips_icc_export_build(VipsObject *object)
 	if (!vips_object_argument_isset(object, "pcs") &&
 		code->in &&
 		code->in->Type == VIPS_INTERPRETATION_XYZ)
-		icc->pcs = VIPS_PCS_XYZ;
+		icc->pcs = VIPS_PCS_XYZ; // FIXME: Invalidates operation cache
 
 	if (icc->pcs == VIPS_PCS_LAB) {
 		cmsCIExyY white;
@@ -1061,18 +1043,18 @@ encode_xyz(float *in, float *out, int n)
 		float Z = in[2] / SCALE;
 
 		/* Transform XYZ D65 to D50, chromatic adaption is done with the
-		 * Bradford transformation.
-		 * See: https://fujiwaratko.sakura.ne.jp/infosci/colorspace/bradford_e.html
+		 * Bradford transformation. See:
+		 * https://fujiwaratko.sakura.ne.jp/infosci/colorspace/bradford_e.html
 		 */
-		out[0] = 1.047886 * X +
-			0.022919 * Y +
-			-0.050216 * Z;
-		out[1] = 0.029582 * X +
-			0.990484 * Y +
-			-0.017079 * Z;
-		out[2] = -0.009252 * X +
-			0.015073 * Y +
-			0.751678 * Z;
+		out[0] = 1.047886F * X +
+			0.022919F * Y +
+			-0.050216F * Z;
+		out[1] = 0.029582F * X +
+			0.990484F * Y +
+			-0.017079F * Z;
+		out[2] = -0.009252F * X +
+			0.015073F * Y +
+			0.751678F * Z;
 
 		in += 3;
 		out += 3;
@@ -1089,7 +1071,7 @@ vips_icc_export_line_xyz(VipsColour *colour,
 	VipsPel *q;
 	int x;
 
-	/* Buffer of encoded float pixels we transform to device space.
+	/* Buffer of PCS pixels we transform to device space.
 	 */
 	float encoded[3 * PIXEL_BUFFER_SIZE];
 
@@ -1188,7 +1170,7 @@ vips_icc_transform_build(VipsObject *object)
 		code->in &&
 		(code->in->Type == VIPS_INTERPRETATION_RGB16 ||
 			code->in->Type == VIPS_INTERPRETATION_GREY16))
-		icc->depth = 16;
+		icc->depth = 16; // FIXME: Invalidates operation cache
 
 	if (vips_icc_set_import(icc,
 			transform->embedded, transform->input_profile_filename))
@@ -1287,7 +1269,8 @@ vips_icc_transform_init(VipsIccTransform *transform)
  * Transform an image from absolute to relative colorimetry using the
  * MediaWhitePoint stored in the ICC profile.
  *
- * See also: vips_icc_transform(), vips_icc_import().
+ * ::: seealso
+ *     [method@Image.icc_transform], [method@Image.icc_import].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1409,8 +1392,7 @@ vips_icc_present(void)
 int
 vips_icc_ac2rc(VipsImage *in, VipsImage **out, const char *profile_filename)
 {
-	vips_error("VipsIcc", "%s",
-		_("libvips configured without lcms support"));
+	vips_error("VipsIcc", "%s", _("libvips configured without lcms support"));
 
 	return -1;
 }
@@ -1428,35 +1410,35 @@ vips_icc_is_compatible_profile(VipsImage *image,
  * vips_icc_import: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Import an image from device space to D65 LAB with an ICC profile.
  *
- * * @pcs: #VipsPCS,  use XYZ or LAB PCS
- * * @intent: #VipsIntent, transform with this intent
- * * @black_point_compensation: %gboolean, enable black point compensation
- * * @embedded: %gboolean, use profile embedded in input image
- * * @input_profile: %gchararray, get the input profile from here
- *
- * Import an image from device space to D65 LAB with an ICC profile. If @pcs is
- * set to #VIPS_PCS_XYZ, use CIE XYZ PCS instead.
+ * If @pcs is set to [enum@Vips.PCS.XYZ], use CIE XYZ PCS instead.
  *
  * The input profile is searched for in three places:
  *
- *	  1. If @embedded is set, libvips will try to use any profile in the input
- *	  image metadata. You can test for the presence of an embedded profile
- *	  with vips_image_get_typeof() with #VIPS_META_ICC_NAME as an argument.
- *	  This will return %GType 0 if there is no profile.
+ * 1. If @embedded is set, libvips will try to use any profile in the input
+ *    image metadata. You can test for the presence of an embedded profile
+ *    with [method@Image.get_typeof] with [const@META_ICC_NAME] as an
+ *    argument. This will return [alias@GObject.Type] 0 if there is no profile.
  *
- *	  2. Otherwise, if @input_profile is set, libvips will try to load a
- *	  profile from the named file. This can aslso be the name of one of the
- *	  built-in profiles.
+ * 2. Otherwise, if @input_profile is set, libvips will try to load a
+ *    profile from the named file. This can also be the name of one of the
+ *    built-in profiles.
  *
- *	  3. Otherwise, libvips will try to pick a compatible profile from the set
- *	  of built-in profiles.
+ * 3. Otherwise, libvips will try to pick a compatible profile from the set
+ *    of built-in profiles.
  *
  * If @black_point_compensation is set, LCMS black point compensation is
  * enabled.
+ *
+ * ::: tip "Optional arguments"
+ *     * @pcs: [enum@PCS], use XYZ or LAB PCS
+ *     * @intent: [enum@Intent], transform with this intent
+ *     * @black_point_compensation: `gboolean`, enable black point compensation
+ *     * @embedded: `gboolean`, use profile embedded in input image
+ *     * @input_profile: `gchararray`, get the input profile from here
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1477,25 +1459,24 @@ vips_icc_import(VipsImage *in, VipsImage **out, ...)
  * vips_icc_export: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @pcs: #VipsPCS,  use XYZ or LAB PCS
- * * @intent: #VipsIntent, transform with this intent
- * * @black_point_compensation: %gboolean, enable black point compensation
- * * @output_profile: %gchararray, get the output profile from here
- * * @depth: %gint, depth of output image in bits
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Export an image from D65 LAB to device space with an ICC profile.
- * If @pcs is
- * set to #VIPS_PCS_XYZ, use CIE XYZ PCS instead.
+ *
+ * If @pcs is set to [enum@Vips.PCS.XYZ], use CIE XYZ PCS instead.
  * If @output_profile is not set, use the embedded profile, if any.
  * If @output_profile is set, export with that and attach it to the output
  * image.
  *
  * If @black_point_compensation is set, LCMS black point compensation is
  * enabled.
+ *
+ * ::: tip "Optional arguments"
+ *     * @pcs: [enum@PCS], use XYZ or LAB PCS
+ *     * @intent: [enum@Intent], transform with this intent
+ *     * @black_point_compensation: `gboolean`, enable black point compensation
+ *     * @output_profile: `gchararray`, get the output profile from here
+ *     * @depth: `gint`, depth of output image in bits
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1517,45 +1498,45 @@ vips_icc_export(VipsImage *in, VipsImage **out, ...)
  * @in: input image
  * @out: (out): output image
  * @output_profile: get the output profile from here
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Transform an image with a pair of ICC profiles.
  *
- * * @pcs: #VipsPCS,  use XYZ or LAB PCS
- * * @intent: #VipsIntent, transform with this intent
- * * @black_point_compensation: %gboolean, enable black point compensation
- * * @embedded: %gboolean, use profile embedded in input image
- * * @input_profile: %gchararray, get the input profile from here
- * * @depth: %gint, depth of output image in bits
- *
- * Transform an image with a pair of ICC profiles. The input image is moved to
- * profile-connection space with the input profile and then to the output
- * space with the output profile.
+ * The input image is moved to profile-connection space with the input
+ * profile and then to the output space with the output profile.
  *
  * The input profile is searched for in three places:
  *
- *	  1. If @embedded is set, libvips will try to use any profile in the input
- *	  image metadata. You can test for the presence of an embedded profile
- *	  with vips_image_get_typeof() with #VIPS_META_ICC_NAME as an argument.
- *	  This will return %GType 0 if there is no profile.
+ * 1. If @embedded is set, libvips will try to use any profile in the input
+ *    image metadata. You can test for the presence of an embedded profile
+ *    with [method@Image.get_typeof] with [const@META_ICC_NAME] as an
+ *    argument. This will return [alias@GObject.Type] 0 if there is no profile.
  *
- *	  2. Otherwise, if @input_profile is set, libvips will try to load a
- *	  profile from the named file. This can aslso be the name of one of the
- *	  built-in profiles.
+ * 2. Otherwise, if @input_profile is set, libvips will try to load a
+ *    profile from the named file. This can also be the name of one of the
+ *    built-in profiles.
  *
- *	  3. Otherwise, libvips will try to pick a compatible profile from the set
- *	  of built-in profiles.
+ * 3. Otherwise, libvips will try to pick a compatible profile from the set
+ *    of built-in profiles.
  *
  * If @black_point_compensation is set, LCMS black point compensation is
  * enabled.
  *
  * @depth defaults to 8, or 16 if @in is a 16-bit image.
  *
- * The output image has the output profile attached to the #VIPS_META_ICC_NAME
+ * The output image has the output profile attached to the [const@META_ICC_NAME]
  * field.
  *
- * Use vips_icc_import() and vips_icc_export() to do either the first or
- * second half of this operation in isolation.
+ * Use [method@Image.icc_import] and [method@Image.icc_export] to do either
+ * the first or second half of this operation in isolation.
+ *
+ * ::: tip "Optional arguments"
+ *     * @pcs: [enum@PCS], use XYZ or LAB PCS
+ *     * @intent: [enum@Intent], transform with this intent
+ *     * @black_point_compensation: `gboolean`, enable black point compensation
+ *     * @embedded: `gboolean`, use profile embedded in input image
+ *     * @input_profile: `gchararray`, get the input profile from here
+ *     * @depth: `gint`, depth of output image in bits
  *
  * Returns: 0 on success, -1 on error.
  */

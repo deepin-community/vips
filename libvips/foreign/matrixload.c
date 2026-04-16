@@ -94,10 +94,8 @@ vips_foreign_load_matrix_build(VipsObject *object)
 	if (!(matrix->sbuf = vips_sbuf_new_from_source(matrix->source)))
 		return -1;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_matrix_parent_class)->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_matrix_parent_class)
+		->build(object);
 }
 
 static VipsForeignFlags
@@ -127,7 +125,7 @@ parse_matrix_header(char *line,
 
 	for (i = 0, p = line; (q = vips_break_token(p, " \t")) && i < 4; i++, p = q)
 		if (vips_strtod(p, &header[i])) {
-			vips_error("matload", _("bad number \"%s\""), p);
+			vips_error("matrixload", _("bad number \"%s\""), p);
 			return -1;
 		}
 
@@ -136,13 +134,13 @@ parse_matrix_header(char *line,
 	if (i < 3)
 		header[2] = 1.0;
 	if (i < 2) {
-		vips_error("matload", "%s", _("no width / height"));
+		vips_error("matrixload", "%s", _("no width / height"));
 		return -1;
 	}
 
-	if (VIPS_FLOOR(header[0]) != header[0] ||
-		VIPS_FLOOR(header[1]) != header[1]) {
-		vips_error("mask2vips", "%s", _("width / height not int"));
+	if (floor(header[0]) != header[0] ||
+		floor(header[1]) != header[1]) {
+		vips_error("matrixload", "%s", _("width / height not int"));
 		return -1;
 	}
 
@@ -154,11 +152,11 @@ parse_matrix_header(char *line,
 		*width > 100000 ||
 		*height <= 0 ||
 		*height > 100000) {
-		vips_error("mask2vips", "%s", _("width / height out of range"));
+		vips_error("matrixload", "%s", _("width / height out of range"));
 		return -1;
 	}
 	if (header[2] == 0.0) {
-		vips_error("mask2vips", "%s", _("zero scale"));
+		vips_error("matrixload", "%s", _("zero scale"));
 		return -1;
 	}
 
@@ -186,7 +184,10 @@ vips_foreign_load_matrix_header(VipsForeignLoad *load)
 	if (vips_source_rewind(matrix->source))
 		return -1;
 
-	line = vips_sbuf_get_line_copy(matrix->sbuf);
+	if (!(line = vips_sbuf_get_line_copy(matrix->sbuf))) {
+		vips_error("matrixload", "%s", _("invalid header"));
+		return -1;
+	}
 	result = parse_matrix_header(line, &width, &height, &scale, &offset);
 	g_free(line);
 	if (result)
@@ -315,11 +316,8 @@ vips_foreign_load_matrix_file_build(VipsObject *object)
 					vips_source_new_from_file(file->filename)))
 			return -1;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_matrix_file_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_matrix_file_parent_class)
+		->build(object);
 }
 
 static const char *vips_foreign_load_matrix_suffs[] = {
@@ -331,7 +329,7 @@ static gboolean
 vips_foreign_load_matrix_file_is_a(const char *filename)
 {
 	unsigned char line[80];
-	guint64 bytes;
+	gint64 bytes;
 	int width;
 	int height;
 	double scale;
@@ -408,11 +406,8 @@ vips_foreign_load_matrix_source_build(VipsObject *object)
 		g_object_ref(matrix->source);
 	}
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_matrix_source_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_matrix_source_parent_class)
+		->build(object);
 }
 
 static int
@@ -429,7 +424,8 @@ vips_foreign_load_matrix_source_is_a_source(VipsSource *source)
 
 	if ((bytes_read = vips_source_sniff_at_most(source, &data, 79)) <= 0)
 		return FALSE;
-	g_strlcpy(line, (const char *) data, 80);
+	data[bytes_read] = '\0';
+	g_strlcpy(line, (const char *) data, sizeof(line));
 
 	vips_error_freeze();
 	result = parse_matrix_header(line, &width, &height, &scale, &offset);
@@ -474,7 +470,7 @@ vips_foreign_load_matrix_source_init(VipsForeignLoadMatrixSource *source)
  * vips_matrixload:
  * @filename: file to load
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Reads a matrix from a file.
  *
@@ -498,7 +494,8 @@ vips_foreign_load_matrix_source_init(VipsForeignLoadMatrixSource *source)
  * Extra characters at the ends of lines or at the end of the file are
  * ignored.
  *
- * See also: vips_matrixload().
+ * ::: seealso
+ *     [ctor@Image.matrixload].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -519,11 +516,12 @@ vips_matrixload(const char *filename, VipsImage **out, ...)
  * vips_matrixload_source:
  * @source: source to load
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Exactly as vips_matrixload(), but read from a source.
+ * Exactly as [ctor@Image.matrixload], but read from a source.
  *
- * See also: vips_matrixload().
+ * ::: seealso
+ *     [ctor@Image.matrixload].
  *
  * Returns: 0 on success, -1 on error.
  */

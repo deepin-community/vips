@@ -105,6 +105,8 @@
  * 2/10/20
  * 	- support "stdin" as a magic input filename for thumbnail_source
  * 	- support ".suffix" as a magic output format for stdout write
+ * 30/4/25
+ *  - rename import/export profile args as input/oputput
  */
 
 #ifdef HAVE_CONFIG_H
@@ -131,8 +133,9 @@ static int thumbnail_width = 128;
 static int thumbnail_height = 128;
 static VipsSize size_restriction = VIPS_SIZE_BOTH;
 static char *output_format = "tn_%s.jpg";
-static char *export_profile = NULL;
-static char *import_profile = NULL;
+static char *output_path = NULL;
+static char *output_profile = NULL;
+static char *input_profile = NULL;
 static gboolean linear_processing = FALSE;
 static gboolean crop_image = FALSE;
 static gboolean no_rotate_image = FALSE;
@@ -155,16 +158,16 @@ static GOptionEntry options[] = {
 		G_OPTION_ARG_STRING, &thumbnail_size,
 		N_("shrink to SIZE or to WIDTHxHEIGHT"),
 		N_("SIZE") },
-	{ "output", 'o', 0,
-		G_OPTION_ARG_STRING, &output_format,
-		N_("output to FORMAT"),
+	{ "path", 0, 0,
+		G_OPTION_ARG_STRING, &output_path,
+		N_("output to path FORMAT"),
 		N_("FORMAT") },
-	{ "export-profile", 'e', 0,
-		G_OPTION_ARG_FILENAME, &export_profile,
+	{ "output-profile", 0, 0,
+		G_OPTION_ARG_FILENAME, &output_profile,
 		N_("export with PROFILE"),
 		N_("PROFILE") },
-	{ "import-profile", 'i', 0,
-		G_OPTION_ARG_FILENAME, &import_profile,
+	{ "input-profile", 0, 0,
+		G_OPTION_ARG_FILENAME, &input_profile,
 		N_("import untagged images with PROFILE"),
 		N_("PROFILE") },
 	{ "linear", 'a', 0,
@@ -187,18 +190,32 @@ static GOptionEntry options[] = {
 	{ "version", 'v', 0, G_OPTION_ARG_NONE, &version,
 		N_("print version"), NULL },
 
+	/* All deprecated.
+	 */
+	{ "output", 'o', G_OPTION_FLAG_HIDDEN,
+		G_OPTION_ARG_STRING, &output_format,
+		N_("output to FORMAT"),
+		N_("FORMAT") },
+	{ "export-profile", 'e', G_OPTION_FLAG_HIDDEN,
+		G_OPTION_ARG_FILENAME, &output_profile,
+		N_("export with PROFILE"),
+		N_("PROFILE") },
+	{ "import-profile", 'i', G_OPTION_FLAG_HIDDEN,
+		G_OPTION_ARG_FILENAME, &input_profile,
+		N_("import untagged images with PROFILE"),
+		N_("PROFILE") },
+	{ "eprofile", 0, G_OPTION_FLAG_HIDDEN,
+		G_OPTION_ARG_FILENAME, &output_profile,
+		N_("export with PROFILE"),
+		N_("PROFILE") },
+	{ "iprofile", 0, G_OPTION_FLAG_HIDDEN,
+		G_OPTION_ARG_FILENAME, &input_profile,
+		N_("import untagged images with PROFILE"),
+		N_("PROFILE") },
 	{ "format", 'f', G_OPTION_FLAG_HIDDEN,
 		G_OPTION_ARG_STRING, &output_format,
 		N_("set output format string to FORMAT"),
 		N_("FORMAT") },
-	{ "eprofile", 0, G_OPTION_FLAG_HIDDEN,
-		G_OPTION_ARG_FILENAME, &export_profile,
-		N_("export with PROFILE"),
-		N_("PROFILE") },
-	{ "iprofile", 0, G_OPTION_FLAG_HIDDEN,
-		G_OPTION_ARG_FILENAME, &import_profile,
-		N_("import untagged images with PROFILE"),
-		N_("PROFILE") },
 	{ "rotate", 't', G_OPTION_FLAG_HIDDEN,
 		G_OPTION_ARG_NONE, &rotate_image,
 		N_("(deprecated, does nothing)"), NULL },
@@ -223,54 +240,93 @@ static GOptionEntry options[] = {
 	{ NULL }
 };
 
+/* Generate the filename of the output object from the input filename.
+ *
+ * For "a/b/c.jpg", use output_path to generate the output filename with
+ * substitutions:
+ *
+ * - %c is whatever cwd is, so an absolute path, perhaps /d/e/f
+ * - %d would be a/b
+ * - %s would be c
+ *
+ * also supports the deprecated output_format option.
+ */
+static char *
+thumbnail_output_filename(const char *filename)
+{
+	char *basename = g_path_get_basename(filename);
+	char *dirname = g_path_get_dirname(filename);
+	char *cwd = g_get_current_dir();
+
+	/* Remove the suffix from basename.
+	 */
+	char *p;
+	if ((p = strrchr(basename, '.')))
+		*p = '\0';
+
+	char path[FILENAME_MAX];
+	VipsBuf buf = VIPS_BUF_STATIC(path);
+
+	if (output_path) {
+		vips_buf_appends(&buf, output_path);
+		(void) vips_buf_all(&buf);
+
+		vips__substitutec(path, FILENAME_MAX, 's', basename);
+		vips__substitutec(path, FILENAME_MAX, 'd', dirname);
+		vips__substitutec(path, FILENAME_MAX, 'c', cwd);
+	}
+	else {
+		/* output_format can be a relative path, in which case we prefix with
+		 * the path from the incoming file.
+		 */
+		if (!g_path_is_absolute(output_format)) {
+			vips_buf_appends(&buf, dirname);
+			vips_buf_appends(&buf, G_DIR_SEPARATOR_S);
+		}
+		vips_buf_appends(&buf, output_format);
+		(void) vips_buf_all(&buf);
+
+		vips__substitute(path, FILENAME_MAX, basename);
+	}
+
+	g_free(basename);
+	g_free(dirname);
+	g_free(cwd);
+
+	return g_strdup(path);
+}
+
+/* If the selected output specifier is a file format (eg. ".jpg"), return
+ * that, otherwise NULL.
+ */
+static const char *
+thumbnail_output_format(void)
+{
+	const char *output = output_path ? output_path : output_format;
+
+	// careful, "./%s.jpg" is a filename, not a format
+	if (vips_isprefix(".", output) &&
+		!vips_isprefix("./", output))
+		return output;
+
+	return NULL;
+}
+
 /* Given (eg.) "/poop/somefile.png", write @im to the thumbnail name,
  * (eg.) "/poop/tn_somefile.jpg".
- *
- * If
  */
 static int
 thumbnail_write_file(VipsObject *process, VipsImage *im, const char *filename)
 {
-	char *file;
-	char *p;
-	char buf[FILENAME_MAX];
-	char *output_name;
+	char *output_filename = thumbnail_output_filename(filename);
 
-	file = g_path_get_basename(filename);
+	g_info("thumbnailing %s as %s", filename, output_filename);
 
-	/* Remove the suffix from the file portion.
-	 */
-	if ((p = strrchr(file, '.')))
-		*p = '\0';
-
-	/* Don't use g_snprintf(), we only want to optionally substitute a
-	 * single %s.
-	 */
-	g_strlcpy(buf, output_format, FILENAME_MAX);
-	vips__substitute(buf, FILENAME_MAX, file);
-
-	/* output_format can be an absolute path, in which case we discard the
-	 * path from the incoming file.
-	 */
-	if (g_path_is_absolute(output_format))
-		output_name = g_strdup(buf);
-	else {
-		char *dir;
-
-		dir = g_path_get_dirname(filename);
-		output_name = g_build_filename(dir, buf, NULL);
-		g_free(dir);
-	}
-
-	g_info("thumbnailing %s as %s", filename, output_name);
-
-	g_free(file);
-
-	if (vips_image_write_to_file(im, output_name, NULL)) {
-		g_free(output_name);
+	if (vips_image_write_to_file(im, output_filename, NULL)) {
+		g_free(output_filename);
 		return -1;
 	}
-	g_free(output_name);
+	g_free(output_filename);
 
 	return 0;
 }
@@ -321,8 +377,8 @@ thumbnail_process(VipsObject *process, const char *name)
 				"no-rotate", no_rotate_image,
 				"crop", interesting,
 				"linear", linear_processing,
-				"import-profile", import_profile,
-				"export-profile", export_profile,
+				"import-profile", input_profile,
+				"output-profile", output_profile,
 				"intent", intent,
 				NULL)) {
 			VIPS_UNREF(source);
@@ -337,8 +393,8 @@ thumbnail_process(VipsObject *process, const char *name)
 				"no-rotate", no_rotate_image,
 				"crop", interesting,
 				"linear", linear_processing,
-				"import-profile", import_profile,
-				"export-profile", export_profile,
+				"import-profile", input_profile,
+				"output-profile", output_profile,
 				"intent", intent,
 				NULL))
 			return -1;
@@ -346,17 +402,15 @@ thumbnail_process(VipsObject *process, const char *name)
 
 	/* If the output format is something like ".jpg", we write to stdout
 	 * instead.
-	 *
-	 * (but allow "./%s.jpg" as a output format)
 	 */
-	if (vips_isprefix(".", output_format) &&
-		!vips_isprefix("./", output_format)) {
+	const char *format;
+	if ((format = thumbnail_output_format())) {
 		VipsTarget *target;
 
 		if (!(target = vips_target_new_to_descriptor(1)))
 			return -1;
 
-		if (vips_image_write_to_target(image, output_format, target, NULL)) {
+		if (vips_image_write_to_target(image, format, target, NULL)) {
 			VIPS_UNREF(image);
 			VIPS_UNREF(target);
 			return -1;
@@ -546,9 +600,8 @@ main(int argc, char **argv)
 
 #ifndef HAVE_EXIF
 	if (rotate_image)
-		g_warning("%s",
-			_("auto-rotate disabled: "
-			  "libvips built without exif support"));
+		g_warning("auto-rotate disabled: "
+				  "libvips built without exif support");
 #endif /*!HAVE_EXIF*/
 
 	result = 0;
@@ -581,5 +634,6 @@ main(int argc, char **argv)
 
 	vips_shutdown();
 
+	vips__win32_terminate(result);
 	return result;
 }

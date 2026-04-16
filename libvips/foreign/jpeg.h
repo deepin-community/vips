@@ -35,13 +35,6 @@
 extern "C" {
 #endif /*__cplusplus*/
 
-/* jpeglib includes jconfig.h, which can define HAVE_STDLIB_H ... which we
- * also define. Make sure it's turned off.
- */
-#ifdef HAVE_STDLIB_H
-#undef HAVE_STDLIB_H
-#endif /*HAVE_STDLIB_H*/
-
 /* jpeglib defines its own boolean type as an enum which then clashes with
  * everyone elses. Rename it as jboolean.
  */
@@ -81,10 +74,54 @@ typedef struct {
 	FILE *fp;	 /* fclose() if non-NULL */
 } ErrorManager;
 
+/* Stuff we track during a read.
+ */
+typedef struct _ReadJpeg {
+	VipsImage *out;
+
+	/* Shrink by this much during load. 1, 2, 4, 8.
+	 */
+	int shrink;
+
+	/* Types of error to cause failure.
+	 */
+	VipsFailOn fail_on;
+
+	struct jpeg_decompress_struct cinfo;
+	ErrorManager eman;
+	gboolean invert_pels;
+
+	/* Use orientation tag to automatically rotate and flip image
+	 * during load.
+	 */
+	gboolean autorotate;
+
+	/* Remove DoS limits.
+	 */
+	gboolean unlimited;
+
+	/* cinfo->output_width and height can be larger than we want since
+	 * libjpeg rounds up on shrink-on-load. This is the real size we will
+	 * output, as opposed to the size we decompress to.
+	 */
+	int output_width;
+	int output_height;
+
+	/* The source we read from.
+	 */
+	VipsSource *source;
+
+} ReadJpeg;
+
 extern const char *vips__jpeg_message_table[];
 
 void vips__new_output_message(j_common_ptr cinfo);
 void vips__new_error_exit(j_common_ptr cinfo);
+
+ReadJpeg *vips__readjpeg_new(VipsSource *source, VipsImage *out,
+	int shrink, VipsFailOn fail_on, gboolean autorotate,
+	gboolean unlimited);
+int vips__readjpeg_open_input(ReadJpeg *jpeg);
 
 #ifdef __cplusplus
 }

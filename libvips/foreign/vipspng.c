@@ -390,7 +390,7 @@ vips__set_text(VipsImage *out, int i, const char *key, const char *text)
 /* Read a png header.
  */
 static int
-png2vips_header(Read *read, VipsImage *out)
+png2vips_header(Read *read, VipsImage *out, gboolean header_only)
 {
 	png_uint_32 width, height;
 	int bitdepth, color_type;
@@ -556,13 +556,18 @@ png2vips_header(Read *read, VipsImage *out)
 #endif
 
 	/* Sanity-check line size.
+	 *
+	 * Don't do this for header read, since we don't want to force a
+	 * malloc if all we are doing is looking at fields.
 	 */
-	png_read_update_info(read->pPng, read->pInfo);
-	if (png_get_rowbytes(read->pPng, read->pInfo) !=
-		VIPS_IMAGE_SIZEOF_LINE(out)) {
-		vips_error("vipspng",
-			"%s", _("unable to read PNG header"));
-		return -1;
+	if (!header_only) {
+		png_read_update_info(read->pPng, read->pInfo);
+		if (png_get_rowbytes(read->pPng, read->pInfo) !=
+			VIPS_IMAGE_SIZEOF_LINE(out)) {
+			vips_error("vipspng",
+				"%s", _("unable to read PNG header"));
+			return -1;
+		}
 	}
 
 	/* Let our caller know. These are very expensive to decode.
@@ -579,7 +584,7 @@ png2vips_header(Read *read, VipsImage *out)
 		 */
 		if (!read->unlimited &&
 			num_text > MAX_PNG_TEXT_CHUNKS) {
-			g_warning(_("%d text chunks, only %d text chunks will be loaded"),
+			g_warning("%d text chunks, only %d text chunks will be loaded",
 				num_text, MAX_PNG_TEXT_CHUNKS);
 			num_text = MAX_PNG_TEXT_CHUNKS;
 		}
@@ -776,14 +781,14 @@ png2vips_image(Read *read, VipsImage *out)
 		 * buffer, then copy to out.
 		 */
 		t[0] = vips_image_new_memory();
-		if (png2vips_header(read, t[0]) ||
+		if (png2vips_header(read, t[0], FALSE) ||
 			png2vips_interlace(read, t[0]) ||
 			vips_image_write(t[0], out))
 			return -1;
 	}
 	else {
 		t[0] = vips_image_new();
-		if (png2vips_header(read, t[0]) ||
+		if (png2vips_header(read, t[0], FALSE) ||
 			vips_image_generate(t[0],
 				NULL, png2vips_generate, NULL,
 				read, NULL) ||
@@ -815,8 +820,8 @@ vips__png_header_source(VipsSource *source, VipsImage *out,
 {
 	Read *read;
 
-	if (!(read = read_new(source, out, TRUE, unlimited)) ||
-		png2vips_header(read, out))
+	if (!(read = read_new(source, out, VIPS_FAIL_ON_NONE, unlimited)) ||
+		png2vips_header(read, out, TRUE))
 		return -1;
 
 	vips_source_minimise(source);
@@ -850,7 +855,7 @@ vips__png_isinterlaced_source(VipsSource *source)
 
 	image = vips_image_new();
 
-	if (!(read = read_new(source, image, TRUE, FALSE))) {
+	if (!(read = read_new(source, image, VIPS_FAIL_ON_NONE, FALSE))) {
 		g_object_unref(image);
 		return -1;
 	}
@@ -1109,8 +1114,7 @@ write_vips(Write *write,
 	}
 	if (compress < 0 ||
 		compress > 9) {
-		vips_error("vips2png",
-			"%s", _("compress should be in [0,9]"));
+		vips_error("vips2png", "%s", _("compress should be in [0,9]"));
 		return -1;
 	}
 
@@ -1149,8 +1153,7 @@ write_vips(Write *write,
 		color_type = PNG_COLOR_TYPE_PALETTE;
 #else
 	if (palette)
-		g_warning("%s",
-			_("ignoring palette (no quantisation support)"));
+		g_warning("ignoring palette (no quantisation support)");
 #endif /*HAVE_QUANTIZATION*/
 
 	interlace_type = interlace ? PNG_INTERLACE_ADAM7 : PNG_INTERLACE_NONE;
@@ -1166,8 +1169,7 @@ write_vips(Write *write,
 	/* Set resolution. libpng uses pixels per meter.
 	 */
 	png_set_pHYs(write->pPng, write->pInfo,
-		VIPS_RINT(in->Xres * 1000), VIPS_RINT(in->Yres * 1000),
-		PNG_RESOLUTION_METER);
+		rint(in->Xres * 1000), rint(in->Yres * 1000), PNG_RESOLUTION_METER);
 
 	/* Metadata
 	 */
@@ -1179,14 +1181,12 @@ write_vips(Write *write,
 		/* XMP is attached as a BLOB with no null-termination.
 		 * We must re-add this.
 		 */
-		if (vips_image_get_blob(in,
-				VIPS_META_XMP_NAME, &data, &length))
+		if (vips_image_get_blob(in, VIPS_META_XMP_NAME, &data, &length))
 			return -1;
 
 		str = g_malloc(length + 1);
 		g_strlcpy(str, data, length + 1);
-		vips__png_set_text(write->pPng, write->pInfo,
-			"XML:com.adobe.xmp", str);
+		vips__png_set_text(write->pPng, write->pInfo, "XML:com.adobe.xmp", str);
 		g_free(str);
 	}
 
@@ -1195,8 +1195,7 @@ write_vips(Write *write,
 		const void *data;
 		size_t length;
 
-		if (vips_image_get_blob(in, VIPS_META_EXIF_NAME,
-				&data, &length))
+		if (vips_image_get_blob(in, VIPS_META_EXIF_NAME, &data, &length))
 			return -1;
 
 		/* libpng does not want the JFIF "Exif\0\0" prefix.
@@ -1207,8 +1206,7 @@ write_vips(Write *write,
 			length -= 6;
 		}
 
-		png_set_eXIf_1(write->pPng, write->pInfo,
-			length, (png_bytep) data);
+		png_set_eXIf_1(write->pPng, write->pInfo, length, (png_bytep) data);
 	}
 #endif /*PNG_eXIf_SUPPORTED*/
 
@@ -1254,8 +1252,7 @@ write_vips(Write *write,
 			palette_count * sizeof(png_byte));
 		trans_count = 0;
 		for (i = 0; i < palette_count; i++) {
-			VipsPel *p = (VipsPel *)
-				VIPS_IMAGE_ADDR(im_palette, i, 0);
+			VipsPel *p = (VipsPel *) VIPS_IMAGE_ADDR(im_palette, i, 0);
 			png_color *col = &png_palette[i];
 
 			col->red = p[0];
@@ -1274,8 +1271,7 @@ write_vips(Write *write,
 		printf("write_vips: attaching %d color palette\n",
 			palette_count);
 #endif /*DEBUG*/
-		png_set_PLTE(write->pPng, write->pInfo, png_palette,
-			palette_count);
+		png_set_PLTE(write->pPng, write->pInfo, png_palette, palette_count);
 		if (trans_count) {
 #ifdef DEBUG
 			printf("write_vips: attaching %d alpha values\n",

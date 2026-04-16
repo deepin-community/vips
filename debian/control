@@ -1,28 +1,29 @@
 Source: vips
 Section: libs
 Priority: optional
-Build-Depends: dpkg-dev (>= 1.22.5), debhelper-compat (= 13), meson, pkgconf,
- gobject-introspection-bin, gir1.2-gobject-2.0-dev,
+Build-Depends: debhelper-compat (= 13), meson, pkgconf,
+ gir1.2-gobject-2.0-dev,
  libjpeg-dev, libtiff-dev, libspng-dev, libcgif-dev, librsvg2-dev,
- libjxl-dev, libpoppler-glib-dev, gobject-introspection, zlib1g-dev,
+ libjxl-dev, libpoppler-glib-dev, gobject-introspection (>= 1.80), zlib1g-dev,
  libfftw3-dev | fftw3-dev, liblcms2-dev, libmagickcore-dev,
  libmagickwand-dev, libfreetype-dev, libpango1.0-dev, libfontconfig-dev,
  libglib2.0-dev, libice-dev, libimagequant-dev, libhwy-dev, libheif-dev,
  libmatio-dev, libexpat1-dev, libcfitsio-dev, libopenslide-dev, libwebp-dev,
- libarchive-dev, libgirepository1.0-dev, graphviz, bc
-Build-Depends-Indep: doxygen, gtk-doc-tools
+ libarchive-dev, graphviz, bc, libopenexr-dev (>= 3.4.6+ds-4)
+Build-Depends-Indep: doxygen, gi-docgen, gtk-doc-tools
 Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>
-Standards-Version: 4.7.0
-Rules-Requires-Root: no
+Standards-Version: 4.7.2
 Homepage: https://libvips.github.io/libvips/
 
-Package: libvips42
+Package: libvips42t64
+Replaces: libvips42
+Breaks: libvips42 (<< ${source:Version})
 Section: libs
 Architecture: any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}, ${shlibs:Depends}
-Provides: libvips
+Provides: ${t64:Provides}, libvips
 Suggests: nip2
 Description: image processing system good for very large ones
  VIPS is an image processing system designed with efficiency in mind.
@@ -42,7 +43,7 @@ Description: image processing system good for very large ones
 Package: libvips-dev
 Section: libdevel
 Architecture: any
-Depends: ${misc:Depends}, libvips42 (= ${binary:Version}), gir1.2-vips-8.0 (= ${binary:Version}),
+Depends: ${misc:Depends}, libvips42t64 (= ${binary:Version}), gir1.2-vips-8.0 (= ${binary:Version}),
  libjpeg-dev, libtiff-dev, zlib1g-dev, libfftw3-dev | fftw3-dev, liblcms2-dev,
  libspng-dev, libmagickcore-dev, libmagickwand-dev, libfreetype-dev,
  libpango1.0-dev, libfontconfig-dev, libglib2.0-dev, libice-dev, gettext,
@@ -114,6 +115,7 @@ Description: image processing system good for very large ones (doc)
 Package: gir1.2-vips-8.0
 Section: introspection
 Architecture: any
+Multi-Arch: same
 Depends: ${gir:Depends}, ${misc:Depends}
 Description: GObject introspection data for VIPS
  VIPS is an image processing system designed with efficiency in mind.

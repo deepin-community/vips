@@ -112,6 +112,10 @@ typedef struct _VipsForeignSaveWebp {
 	 */
 	gboolean lossless;
 
+	/* Preserve color values from transparent pixels.
+	 */
+	gboolean exact;
+
 	/* Lossy compression preset.
 	 */
 	VipsForeignWebpPreset preset;
@@ -294,7 +298,25 @@ vips_foreign_save_webp_write_webp_image(VipsForeignSaveWebp *webp,
 	return 0;
 }
 
-/* We have a complete frame --- write!
+static int
+vips_foreign_save_webp_get_delay(VipsForeignSaveWebp *webp, int page_number)
+{
+	int delay;
+
+	if (webp->delay &&
+		page_number < webp->delay_length)
+		delay = webp->delay[page_number];
+	else
+		// the old gif delay field was in centiseconds, so convert to ms
+		delay = webp->gif_delay * 10;
+
+	/* Force frames with a small or no duration to 100ms for consistency
+	 * with web browsers and other transcoding tools.
+	 */
+	return delay <= 10 ? 100 : delay;
+}
+
+/* We have a complete frame -- write!
  */
 static int
 vips_foreign_save_webp_write_frame(VipsForeignSaveWebp *webp)
@@ -318,11 +340,8 @@ vips_foreign_save_webp_write_frame(VipsForeignSaveWebp *webp)
 
 		/* Adjust current timestamp
 		 */
-		if (webp->delay &&
-			webp->page_number < webp->delay_length)
-			webp->timestamp_ms += webp->delay[webp->page_number];
-		else
-			webp->timestamp_ms += webp->gif_delay * 10;
+		webp->timestamp_ms +=
+			vips_foreign_save_webp_get_delay(webp, webp->page_number);
 	}
 	else {
 		/* Single image write
@@ -607,6 +626,7 @@ vips_foreign_save_webp_init_config(VipsForeignSaveWebp *webp)
 	}
 
 	webp->config.lossless = webp->lossless || webp->near_lossless;
+	webp->config.exact = webp->exact;
 	webp->config.alpha_quality = webp->alpha_q;
 	webp->config.method = webp->effort;
 	webp->config.target_size = webp->target_size;
@@ -636,7 +656,6 @@ vips_foreign_save_webp_init_anim_enc(VipsForeignSaveWebp *webp)
 	int page_height = vips_image_get_page_height(save->ready);
 
 	WebPAnimEncoderOptions anim_config;
-	int i;
 
 	/* Init config for animated write
 	 */
@@ -659,30 +678,18 @@ vips_foreign_save_webp_init_anim_enc(VipsForeignSaveWebp *webp)
 	/* Get delay array
 	 *
 	 * There might just be the old gif-delay field. This is centiseconds.
+	 * New images have an array of ints giving millisecond durations.
 	 */
 	webp->gif_delay = 10;
 	if (vips_image_get_typeof(save->ready, "gif-delay") &&
 		vips_image_get_int(save->ready, "gif-delay", &webp->gif_delay))
 		return -1;
 
-	/* New images have an array of ints instead.
-	 */
 	webp->delay = NULL;
 	if (vips_image_get_typeof(save->ready, "delay") &&
 		vips_image_get_array_int(save->ready, "delay",
 			&webp->delay, &webp->delay_length))
 		return -1;
-
-	/* Force frames with a small or no duration to 100ms
-	 * to be consistent with web browsers and other
-	 * transcoding tools.
-	 */
-	if (webp->gif_delay <= 1)
-		webp->gif_delay = 10;
-
-	for (i = 0; i < webp->delay_length; i++)
-		if (webp->delay[i] <= 10)
-			webp->delay[i] = 100;
 
 	return 0;
 }
@@ -819,7 +826,8 @@ vips_foreign_save_webp_class_init(VipsForeignSaveWebpClass *class)
 
 	foreign_class->suffs = vips__save_webp_suffs;
 
-	save_class->saveable = VIPS_SAVEABLE_RGBA_ONLY;
+	save_class->saveable =
+		VIPS_FOREIGN_SAVEABLE_RGB | VIPS_FOREIGN_SAVEABLE_ALPHA;
 	save_class->format_table = bandfmt_webp;
 
 	VIPS_ARG_INT(class, "Q", 10,
@@ -836,7 +844,14 @@ vips_foreign_save_webp_class_init(VipsForeignSaveWebpClass *class)
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, lossless),
 		FALSE);
 
-	VIPS_ARG_ENUM(class, "preset", 12,
+	VIPS_ARG_BOOL(class, "exact", 12,
+		_("Exact"),
+		_("Preserve color values from transparent pixels"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveWebp, exact),
+		FALSE);
+
+	VIPS_ARG_ENUM(class, "preset", 13,
 		_("Preset"),
 		_("Preset for lossy compression"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
@@ -844,89 +859,89 @@ vips_foreign_save_webp_class_init(VipsForeignSaveWebpClass *class)
 		VIPS_TYPE_FOREIGN_WEBP_PRESET,
 		VIPS_FOREIGN_WEBP_PRESET_DEFAULT);
 
-	VIPS_ARG_BOOL(class, "smart_subsample", 13,
+	VIPS_ARG_BOOL(class, "smart_subsample", 14,
 		_("Smart subsampling"),
 		_("Enable high quality chroma subsampling"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, smart_subsample),
 		FALSE);
 
-	VIPS_ARG_BOOL(class, "near_lossless", 14,
+	VIPS_ARG_BOOL(class, "near_lossless", 15,
 		_("Near lossless"),
 		_("Enable preprocessing in lossless mode (uses Q)"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, near_lossless),
 		FALSE);
 
-	VIPS_ARG_INT(class, "alpha_q", 15,
+	VIPS_ARG_INT(class, "alpha_q", 16,
 		_("Alpha quality"),
 		_("Change alpha plane fidelity for lossy compression"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, alpha_q),
 		0, 100, 100);
 
-	VIPS_ARG_BOOL(class, "min_size", 16,
+	VIPS_ARG_BOOL(class, "min_size", 17,
 		_("Minimise size"),
 		_("Optimise for minimum size"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, min_size),
 		FALSE);
 
-	VIPS_ARG_INT(class, "kmin", 17,
+	VIPS_ARG_INT(class, "kmin", 18,
 		_("Minimum keyframe spacing"),
 		_("Minimum number of frames between key frames"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, kmin),
 		0, INT_MAX, INT_MAX - 1);
 
-	VIPS_ARG_INT(class, "kmax", 18,
+	VIPS_ARG_INT(class, "kmax", 19,
 		_("Maximum keyframe spacing"),
 		_("Maximum number of frames between key frames"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, kmax),
 		0, INT_MAX, INT_MAX);
 
-	VIPS_ARG_INT(class, "effort", 19,
+	VIPS_ARG_INT(class, "effort", 20,
 		_("Effort"),
 		_("Level of CPU effort to reduce file size"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, effort),
 		0, 6, 4);
 
-	VIPS_ARG_INT(class, "target_size", 20,
+	VIPS_ARG_INT(class, "target_size", 21,
 		_("Target size"),
 		_("Desired target size in bytes"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, target_size),
 		0, INT_MAX, 0);
 
-	VIPS_ARG_INT(class, "passes", 23,
-		_("Passes"),
-		_("Number of entropy-analysis passes (in [1..10])"),
-		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveWebp, passes),
-		1, 10, 1);
-
-	VIPS_ARG_INT(class, "reduction_effort", 21,
+	VIPS_ARG_INT(class, "reduction_effort", 22,
 		_("Reduction effort"),
 		_("Level of CPU effort to reduce file size"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT | VIPS_ARGUMENT_DEPRECATED,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, effort),
 		0, 6, 4);
 
-	VIPS_ARG_BOOL(class, "mixed", 22,
+	VIPS_ARG_BOOL(class, "mixed", 23,
 		_("Mixed encoding"),
 		_("Allow mixed encoding (might reduce file size)"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, mixed),
 		FALSE);
 
-	VIPS_ARG_BOOL(class, "smart_deblock", 23,
+	VIPS_ARG_BOOL(class, "smart_deblock", 24,
 		_("Smart deblocking"),
 		_("Enable auto-adjusting of the deblocking filter"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveWebp, smart_deblock),
 		FALSE);
+
+	VIPS_ARG_INT(class, "passes", 25,
+		_("Passes"),
+		_("Number of entropy-analysis passes (in [1..10])"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveWebp, passes),
+		1, 10, 1);
 }
 
 static void
@@ -963,11 +978,8 @@ vips_foreign_save_webp_target_build(VipsObject *object)
 	webp->target = target->target;
 	g_object_ref(webp->target);
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_webp_target_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_save_webp_target_parent_class)
+		->build(object);
 }
 
 static void
@@ -1015,11 +1027,8 @@ vips_foreign_save_webp_file_build(VipsObject *object)
 	if (!(webp->target = vips_target_new_to_file(file->filename)))
 		return -1;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_webp_file_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_save_webp_file_parent_class)
+		->build(object);
 }
 
 static void
@@ -1063,8 +1072,6 @@ vips_foreign_save_webp_buffer_build(VipsObject *object)
 	VipsForeignSaveWebp *webp = (VipsForeignSaveWebp *) object;
 	VipsForeignSaveWebpBuffer *buffer = (VipsForeignSaveWebpBuffer *) object;
 
-	VipsBlob *blob;
-
 	if (!(webp->target = vips_target_new_to_memory()))
 		return -1;
 
@@ -1072,6 +1079,7 @@ vips_foreign_save_webp_buffer_build(VipsObject *object)
 			->build(object))
 		return -1;
 
+	VipsBlob *blob;
 	g_object_get(webp->target, "blob", &blob, NULL);
 	g_object_set(buffer, "buffer", blob, NULL);
 	vips_area_unref(VIPS_AREA(blob));
@@ -1168,24 +1176,7 @@ vips_foreign_save_webp_mime_init(VipsForeignSaveWebpMime *mime)
  * vips_webpsave: (method)
  * @in: image to save
  * @filename: file to write to
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @Q: %gint, quality factor
- * * @lossless: %gboolean, enables lossless compression
- * * @preset: #VipsForeignWebpPreset, choose lossy compression preset
- * * @smart_subsample: %gboolean, enables high quality chroma subsampling
- * * @smart_deblock: %gboolean, enables auto-adjusting of the deblocking filter
- * * @near_lossless: %gboolean, preprocess in lossless mode (controlled by Q)
- * * @alpha_q: %gint, set alpha quality in lossless mode
- * * @effort: %gint, level of CPU effort to reduce file size
- * * @target_size: %gint, desired target size in bytes
- * * @passes: %gint, number of entropy-analysis passes
- * * @min_size: %gboolean, minimise size
- * * @mixed: %gboolean, allow both lossy and lossless encoding
- * * @kmin: %gint, minimum number of frames between keyframes
- * * @kmax: %gint, maximum number of frames between keyframes
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Write an image to a file in WebP format.
  *
@@ -1194,7 +1185,7 @@ vips_foreign_save_webp_mime_init(VipsForeignSaveWebpMime *mime)
  * default 75.
  *
  * Use @preset to hint the image type to the lossy compressor. The default is
- * #VIPS_FOREIGN_WEBP_PRESET_DEFAULT.
+ * [enum@Vips.ForeignWebpPreset.DEFAULT].
  *
  * Set @smart_subsample to enable high quality chroma subsampling.
  *
@@ -1220,6 +1211,10 @@ vips_foreign_save_webp_mime_init(VipsForeignSaveWebpMime *mime)
  * with @Q 80, 60, 40 or 20 to apply increasing amounts of preprocessing
  * which improves the near-lossless compression ratio by up to 50%.
  *
+ * Set @exact to preserve the color data in transparent pixels. This can
+ * reduce compression efficiency, but is generally required when working with
+ * images as data.
+ *
  * For animated webp output, @min_size will try to optimize for minimum size.
  *
  * For animated webp output, @kmax sets the maximum number of frames between
@@ -1233,7 +1228,27 @@ vips_foreign_save_webp_mime_init(VipsForeignSaveWebpMime *mime)
  * Use the metadata items `loop` and `delay` to set the number of
  * loops for the animation and the frame delays.
  *
- * See also: vips_webpload(), vips_image_write_to_file().
+ * ::: tip "Optional arguments"
+ *     * @Q: `gint`, quality factor
+ *     * @lossless: `gboolean`, enables lossless compression
+ *     * @exact: `gboolean`, preserves color values from transparent pixels
+ *     * @preset: [enum@ForeignWebpPreset], choose lossy compression preset
+ *     * @smart_subsample: `gboolean`, enables high quality chroma subsampling
+ *     * @smart_deblock: `gboolean`, enables auto-adjusting of the deblocking
+ *       filter
+ *     * @near_lossless: `gboolean`, preprocess in lossless mode (controlled
+ *       by Q)
+ *     * @alpha_q: `gint`, set alpha quality in lossless mode
+ *     * @effort: `gint`, level of CPU effort to reduce file size
+ *     * @target_size: `gint`, desired target size in bytes
+ *     * @passes: `gint`, number of entropy-analysis passes
+ *     * @min_size: `gboolean`, minimise size
+ *     * @mixed: `gboolean`, allow both lossy and lossless encoding
+ *     * @kmin: `gint`, minimum number of frames between keyframes
+ *     * @kmax: `gint`, maximum number of frames between keyframes
+ *
+ * ::: seealso
+ *     [ctor@Image.webpload], [method@Image.write_to_file].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1255,32 +1270,35 @@ vips_webpsave(VipsImage *in, const char *filename, ...)
  * @in: image to save
  * @buf: (out) (array length=len) (element-type guint8): return output buffer here
  * @len: return output length here
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
- *
- * * @Q: %gint, quality factor
- * * @lossless: %gboolean, enables lossless compression
- * * @preset: #VipsForeignWebpPreset, choose lossy compression preset
- * * @smart_subsample: %gboolean, enables high quality chroma subsampling
- * * @smart_deblock: %gboolean, enables auto-adjusting of the deblocking filter
- * * @near_lossless: %gboolean, preprocess in lossless mode (controlled by Q)
- * * @alpha_q: %gint, set alpha quality in lossless mode
- * * @effort: %gint, level of CPU effort to reduce file size
- * * @target_size: %gint, desired target size in bytes
- * * @passes: %gint, number of entropy-analysis passes
- * * @min_size: %gboolean, minimise size
- * * @mixed: %gboolean, allow both lossy and lossless encoding
- * * @kmin: %gint, minimum number of frames between keyframes
- * * @kmax: %gint, maximum number of frames between keyframes
- *
- * As vips_webpsave(), but save to a memory buffer.
+ * As [method@Image.webpsave], but save to a memory buffer.
  *
  * The address of the buffer is returned in @buf, the length of the buffer in
- * @len. You are responsible for freeing the buffer with g_free() when you
+ * @len. You are responsible for freeing the buffer with [func@GLib.free] when you
  * are done with it.
  *
- * See also: vips_webpsave().
+ * ::: tip "Optional arguments"
+ *     * @Q: `gint`, quality factor
+ *     * @lossless: `gboolean`, enables lossless compression
+ *     * @preset: [enum@ForeignWebpPreset], choose lossy compression preset
+ *     * @exact: `gboolean`, preserves color values from transparent pixels
+ *     * @smart_subsample: `gboolean`, enables high quality chroma subsampling
+ *     * @smart_deblock: `gboolean`, enables auto-adjusting of the deblocking
+ *       filter
+ *     * @near_lossless: `gboolean`, preprocess in lossless mode (controlled
+ *       by Q)
+ *     * @alpha_q: `gint`, set alpha quality in lossless mode
+ *     * @effort: `gint`, level of CPU effort to reduce file size
+ *     * @target_size: `gint`, desired target size in bytes
+ *     * @passes: `gint`, number of entropy-analysis passes
+ *     * @min_size: `gboolean`, minimise size
+ *     * @mixed: `gboolean`, allow both lossy and lossless encoding
+ *     * @kmin: `gint`, minimum number of frames between keyframes
+ *     * @kmax: `gint`, maximum number of frames between keyframes
+ *
+ * ::: seealso
+ *     [method@Image.webpsave].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1315,28 +1333,31 @@ vips_webpsave_buffer(VipsImage *in, void **buf, size_t *len, ...)
 /**
  * vips_webpsave_mime: (method)
  * @in: image to save
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * As [method@Image.webpsave], but save as a mime webp on stdout.
  *
- * * @Q: %gint, quality factor
- * * @lossless: %gboolean, enables lossless compression
- * * @preset: #VipsForeignWebpPreset, choose lossy compression preset
- * * @smart_subsample: %gboolean, enables high quality chroma subsampling
- * * @smart_deblock: %gboolean, enables auto-adjusting of the deblocking filter
- * * @near_lossless: %gboolean, preprocess in lossless mode (controlled by Q)
- * * @alpha_q: %gint, set alpha quality in lossless mode
- * * @effort: %gint, level of CPU effort to reduce file size
- * * @target_size: %gint, desired target size in bytes
- * * @passes: %gint, number of entropy-analysis passes
- * * @min_size: %gboolean, minimise size
- * * @mixed: %gboolean, allow both lossy and lossless encoding
- * * @kmin: %gint, minimum number of frames between keyframes
- * * @kmax: %gint, maximum number of frames between keyframes
+ * ::: tip "Optional arguments"
+ *     * @Q: `gint`, quality factor
+ *     * @lossless: `gboolean`, enables lossless compression
+ *     * @exact: `gboolean`, preserves color values from transparent pixels
+ *     * @preset: [enum@ForeignWebpPreset], choose lossy compression preset
+ *     * @smart_subsample: `gboolean`, enables high quality chroma subsampling
+ *     * @smart_deblock: `gboolean`, enables auto-adjusting of the deblocking
+ *       filter
+ *     * @near_lossless: `gboolean`, preprocess in lossless mode (controlled
+ *       by Q)
+ *     * @alpha_q: `gint`, set alpha quality in lossless mode
+ *     * @effort: `gint`, level of CPU effort to reduce file size
+ *     * @target_size: `gint`, desired target size in bytes
+ *     * @passes: `gint`, number of entropy-analysis passes
+ *     * @min_size: `gboolean`, minimise size
+ *     * @mixed: `gboolean`, allow both lossy and lossless encoding
+ *     * @kmin: `gint`, minimum number of frames between keyframes
+ *     * @kmax: `gint`, maximum number of frames between keyframes
  *
- * As vips_webpsave(), but save as a mime webp on stdout.
- *
- * See also: vips_webpsave(), vips_image_write_to_file().
+ * ::: seealso
+ *     [method@Image.webpsave], [method@Image.write_to_file].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -1357,28 +1378,30 @@ vips_webpsave_mime(VipsImage *in, ...)
  * vips_webpsave_target: (method)
  * @in: image to save
  * @target: save image to this target
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * As [method@Image.webpsave], but save to a target.
  *
- * * @Q: %gint, quality factor
- * * @lossless: %gboolean, enables lossless compression
- * * @preset: #VipsForeignWebpPreset, choose lossy compression preset
- * * @smart_subsample: %gboolean, enables high quality chroma subsampling
- * * @smart_deblock: %gboolean, enables auto-adjusting of the deblocking filter
- * * @near_lossless: %gboolean, preprocess in lossless mode (controlled by Q)
- * * @alpha_q: %gint, set alpha quality in lossless mode
- * * @effort: %gint, level of CPU effort to reduce file size
- * * @target_size: %gint, desired target size in bytes
- * * @passes: %gint, number of entropy-analysis passes
- * * @min_size: %gboolean, minimise size
- * * @mixed: %gboolean, allow both lossy and lossless encoding
- * * @kmin: %gint, minimum number of frames between keyframes
- * * @kmax: %gint, maximum number of frames between keyframes
+ * ::: tip "Optional arguments"
+ *     * @Q: `gint`, quality factor
+ *     * @lossless: `gboolean`, enables lossless compression
+ *     * @preset: [enum@ForeignWebpPreset], choose lossy compression preset
+ *     * @smart_subsample: `gboolean`, enables high quality chroma subsampling
+ *     * @smart_deblock: `gboolean`, enables auto-adjusting of the deblocking
+ *       filter
+ *     * @near_lossless: `gboolean`, preprocess in lossless mode (controlled
+ *       by Q)
+ *     * @alpha_q: `gint`, set alpha quality in lossless mode
+ *     * @effort: `gint`, level of CPU effort to reduce file size
+ *     * @target_size: `gint`, desired target size in bytes
+ *     * @passes: `gint`, number of entropy-analysis passes
+ *     * @min_size: `gboolean`, minimise size
+ *     * @mixed: `gboolean`, allow both lossy and lossless encoding
+ *     * @kmin: `gint`, minimum number of frames between keyframes
+ *     * @kmax: `gint`, maximum number of frames between keyframes
  *
- * As vips_webpsave(), but save to a target.
- *
- * See also: vips_webpsave().
+ * ::: seealso
+ *     [method@Image.webpsave].
  *
  * Returns: 0 on success, -1 on error.
  */

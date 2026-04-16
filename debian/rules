@@ -16,12 +16,18 @@ override_dh_auto_test:
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-Ddoxygen=$(if $(filter libvips-doc,$(shell dh_listpackages)),true,false) \
-		-Dgtk_doc=$(if $(filter libvips-doc,$(shell dh_listpackages)),true,false)
+		-Dcpp-docs=$(if $(filter libvips-doc,$(shell dh_listpackages)),true,false) \
+		-Ddocs=$(if $(filter libvips-doc,$(shell dh_listpackages)),true,false)
 
 execute_after_dh_auto_install-indep:
-	mv $(DESTDIR)/usr/share/doc/vips-doc/ \
-		$(DESTDIR)/usr/share/doc/libvips-doc
+ifneq (,$(filter libvips-doc,$(shell dh_listpackages)))
+	install -d -m0755 $(DESTDIR)/usr/share/gtk-doc/html/
+	mv $(DESTDIR)/usr/share/doc/vips/ \
+		$(DESTDIR)/usr/share/gtk-doc/html/libvips/
+	install -d -m0755 $(DESTDIR)/usr/share/doc/libvips-doc/
+	mv $(DESTDIR)/usr/share/doc/vips-cpp/html/ \
+		$(DESTDIR)/usr/share/doc/libvips-doc/
+endif
 
 execute_after_dh_auto_install-arch:
 	perl $(CURDIR)/debian/scripts/create_missing_manual_pages

@@ -73,14 +73,15 @@ vips_labelregions_build(VipsObject *object)
 
 	/* Create the zero mask image in memory.
 	 */
-	mask = vips_image_new_memory();
+	if (vips_black(&t[0], in->Xsize, in->Ysize, NULL) ||
+		vips_cast(t[0], &t[1], VIPS_FORMAT_INT, NULL) ||
+		!(t[2] = vips_image_copy_memory(t[1])))
+		return -1;
+
+	mask = t[2];
 	g_object_set(object,
 		"mask", mask,
 		NULL);
-	if (vips_black(&t[0], in->Xsize, in->Ysize, NULL) ||
-		vips_cast(t[0], &t[1], VIPS_FORMAT_INT, NULL) ||
-		vips_image_write(t[1], mask))
-		return -1;
 
 	segments = 1;
 	m = (int *) mask->data;
@@ -143,11 +144,9 @@ vips_labelregions_init(VipsLabelregions *labelregions)
  * vips_labelregions: (method)
  * @in: image to test
  * @mask: write labelled regions here
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
- *
- * * @segments: return number of regions found here
+ * Label regions of equal pixels in an image.
  *
  * Repeatedly scans @in for regions of 4-connected pixels
  * with the same pixel value. Every time a region is discovered, those
@@ -155,16 +154,20 @@ vips_labelregions_init(VipsLabelregions *labelregions)
  * have been labelled, the operation returns, setting @segments to the number
  * of discrete regions which were detected.
  *
- * @mask is always a 1-band #VIPS_FORMAT_INT image of the same dimensions as
- * @in.
+ * @mask is always a 1-band [enum@Vips.BandFormat.INT] image of the same
+ * dimensions as @in.
  *
  * This operation is useful for, for example, blob counting. You can use the
  * morphological operators to detect and isolate a series of objects, then use
- * vips_labelregions() to number them all.
+ * [method@Image.labelregions] to number them all.
  *
- * Use vips_hist_find_indexed() to (for example) find blob coordinates.
+ * Use [method@Image.hist_find_indexed] to (for example) find blob coordinates.
  *
- * See also: vips_hist_find_indexed().
+ * ::: tip "Optional arguments"
+ *     * @segments: `gint`, output, number of regions found
+ *
+ * ::: seealso
+ *     [method@Image.hist_find_indexed].
  *
  * Returns: 0 on success, -1 on error.
  */

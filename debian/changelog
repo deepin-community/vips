@@ -1,14 +1,76 @@
-vips (8.16.1-1deepin2) unstable; urgency=medium
+vips (8.18.2-1) unstable; urgency=medium
 
-  * Rebuild against imagemagick 7.
+  * New upstream release.
 
- -- Tianyu Chen <sweetyfish@deepin.org>  Thu, 04 Sep 2025 23:05:16 +0800
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 05 Apr 2026 13:24:50 +0200
 
-vips (8.16.1-1deepin1) unstable; urgency=medium
+vips (8.18.1-1) unstable; urgency=medium
 
-  * revert t64.
+  * New upstream release.
 
- -- lhdjply <lhdjply@126.com>  Mon, 28 Jul 2025 08:25:48 +0800
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Thu, 26 Mar 2026 21:15:49 +0100
+
+vips (8.18.0-3) unstable; urgency=medium
+
+  * Backport upstream security fix for CVE-2026-3283 and CVE-2026-3284:
+    manipulation of the argument in vips_extract_band_build() leads to
+    out-of-bounds read (closes: #1129310).
+  * Backport upstream security fix for CVE-2026-3145 and CVE-2026-3146:
+    vips_foreign_load_matrix_header() memory corruption (closes: #1129315).
+  * Backport upstream security fix for CVE-2026-3282: manipulation of the
+    argument in vips_unpremultiply_build() can lead to out-of-bounds read
+    (closes: #1129311).
+  * Backport upstream security fix for CVE-2026-3147: heap-based buffer
+    overflow in vips_foreign_load_csv_build() (closes: #1129314).
+  * Backport upstream security fix for CVE-2026-3281: manipulation of the
+    argument in vips_bandrank_build() results in heap-based buffer overflow
+    (closes: #1129312).
+  * Mark gir1.2-vips-8.0 Multi-Arch: same.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 01 Mar 2026 07:46:08 +0100
+
+vips (8.18.0-2) unstable; urgency=high
+
+  * Backport upstream security fix for CVE-2026-2913: heap-based overflow
+    in vips_source_read_to_memory() (closes: #1128785).
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 22 Feb 2026 20:08:32 +0100
+
+vips (8.18.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sat, 20 Dec 2025 17:24:02 +0100
+
+vips (8.17.3-2) unstable; urgency=medium
+
+  * Backport upstream fixes:
+    - pngsave, ppmsave: support more interpretations,
+    - ppmsave: fix interpretation apply,
+    - pngsave: cast to target format when colourspace is unsupported.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 30 Nov 2025 14:47:08 +0100
+
+vips (8.17.3-1) unstable; urgency=medium
+
+  * New upstream release (closes: #1114678):
+    - fixes CVE-2025-59933: buffer over-read in poppler-based pdfload()
+      (closes: #1117049).
+  * Update build dependency to gobject-introspection (closes: #1118931).
+  * Remove gobject-introspection-bin build dependency (closes: #1094627).
+  * Update watch file.
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Sun, 09 Nov 2025 09:26:58 +0100
+
+vips (8.16.1-2) unstable; urgency=medium
+
+  * Backport upstream revised fix for CVE-2025-29769: improve alpha channel
+    detection in heif.
+  * Remove now redundant Rules-Requires-Root value.
+  * Refer online version of Free Software Foundation licence.
+  * Update Standards-Version to 4.7.2 .
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Thu, 01 May 2025 08:47:18 +0200
 
 vips (8.16.1-1) unstable; urgency=medium
 

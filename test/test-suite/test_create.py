@@ -73,6 +73,11 @@ class TestCreate:
         assert im.min() == 0.0
 
     @skip_if_no("fwfft")
+    def test_fwfft_small_image(self):
+        im = pyvips.Image.black(2, 1)
+        im.fwfft()
+
+    @skip_if_no("fwfft")
     def test_fractsurf(self):
         im = pyvips.Image.fractsurf(100, 90, 2.5)
         assert im.width == 100
@@ -480,7 +485,6 @@ class TestCreate:
         assert im.bands == 1
         assert im.format == pyvips.BandFormat.FLOAT
 
-    @skip_if_no("worley")
     def test_worley(self):
         im = pyvips.Image.worley(512, 512)
         assert im.width == 512
@@ -488,7 +492,6 @@ class TestCreate:
         assert im.bands == 1
         assert im.format == pyvips.BandFormat.FLOAT
 
-    @skip_if_no("perlin")
     def test_perlin(self):
         im = pyvips.Image.perlin(512, 512)
         assert im.width == 512

@@ -107,7 +107,7 @@ vips_maplut_posteval(VipsImage *image, VipsProgress *progress,
 	VipsMaplut *maplut)
 {
 	if (maplut->overflow)
-		g_warning(_("%d overflows detected"), maplut->overflow);
+		g_warning("%d overflows detected", maplut->overflow);
 }
 
 /* Our sequence value: the region this sequence is using, and local stats.
@@ -151,8 +151,16 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 				OUT *q = (OUT *) VIPS_REGION_ADDR(out_region, le, y); \
 				OUT *tlut = (OUT *) maplut->table[z]; \
 \
-				for (x = z; x < ne; x += b) \
-					q[x] = tlut[p[x]]; \
+				for (x = z; x < ne; x += b) { \
+					unsigned int index = p[x]; \
+\
+					if (index > maplut->clp) { \
+						index = maplut->clp; \
+						seq->overflow++; \
+					} \
+\
+					q[x] = tlut[index]; \
+				} \
 			} \
 		} \
 	}
@@ -191,7 +199,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 				OUT *tlut = (OUT *) maplut->table[z]; \
 \
 				for (x = z; x < ne; x += b) { \
-					int index = p[x]; \
+					unsigned int index = p[x]; \
 \
 					if (index > maplut->clp) { \
 						index = maplut->clp; \
@@ -215,7 +223,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 				OUT *tlut = (OUT *) maplut->table[z]; \
 \
 				for (x = 0; x < ne; x += b) { \
-					int index = p[x]; \
+					unsigned int index = p[x]; \
 \
 					if (index > maplut->clp) { \
 						index = maplut->clp; \
@@ -241,8 +249,16 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			OUT *q = (OUT *) VIPS_REGION_ADDR(out_region, le, y); \
 			VipsPel *p = VIPS_REGION_ADDR(ir, le, y); \
 \
-			for (x = 0; x < ne; x++) \
-				q[x] = tlut[p[x]]; \
+			for (x = 0; x < ne; x++) { \
+				unsigned int index = p[x]; \
+\
+				if (index > maplut->clp) { \
+					index = maplut->clp; \
+					seq->overflow++; \
+				} \
+\
+				q[x] = tlut[index]; \
+			} \
 		} \
 	}
 
@@ -278,7 +294,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			IN *p = (IN *) VIPS_REGION_ADDR(ir, le, y); \
 \
 			for (x = 0; x < ne; x++) { \
-				int index = p[x]; \
+				unsigned int index = p[x]; \
 \
 				if (index > maplut->clp) { \
 					index = maplut->clp; \
@@ -299,7 +315,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			IN *p = (IN *) VIPS_REGION_ADDR(ir, le, y); \
 \
 			for (x = 0; x < ne; x++) { \
-				int index = p[x]; \
+				unsigned int index = p[x]; \
 \
 				if (index > maplut->clp) { \
 					index = maplut->clp; \
@@ -324,7 +340,12 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			VipsPel *p = VIPS_REGION_ADDR(ir, le, y); \
 \
 			for (i = 0, x = 0; x < np; x++) { \
-				int n = p[x]; \
+				unsigned int n = p[x]; \
+\
+				if (n > maplut->clp) { \
+					n = maplut->clp; \
+					seq->overflow++; \
+				} \
 \
 				for (z = 0; z < maplut->nb; z++, i++) \
 					q[i] = tlut[z][n]; \
@@ -365,7 +386,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			OUT *q = (OUT *) VIPS_REGION_ADDR(out_region, le, y); \
 \
 			for (i = 0, x = 0; x < np; x++) { \
-				int n = p[x]; \
+				unsigned int n = p[x]; \
 \
 				if (n > maplut->clp) { \
 					n = maplut->clp; \
@@ -389,7 +410,7 @@ vips_maplut_start(VipsImage *out, void *a, void *b)
 			OUT *q = (OUT *) VIPS_REGION_ADDR(out_region, le, y); \
 \
 			for (x = 0; x < np; x++) { \
-				int n = p[x]; \
+				unsigned int n = p[x]; \
 \
 				if (n > maplut->clp) { \
 					n = maplut->clp; \
@@ -777,20 +798,16 @@ vips_maplut_init(VipsMaplut *maplut)
  * @in: input image
  * @out: (out): output image
  * @lut: look-up table
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @band: apply one-band @lut to this band of @in
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Map an image through another image acting as a LUT (Look Up Table).
  * The lut may have any type and the output image will be that type.
  *
  * The input image will be cast to one of the unsigned integer types, that is,
- * VIPS_FORMAT_UCHAR, VIPS_FORMAT_USHORT or VIPS_FORMAT_UINT.
+ * [enum@Vips.BandFormat.UCHAR], [enum@Vips.BandFormat.USHORT] or [enum@Vips.BandFormat.UINT].
  *
  * If @lut is too small for the input type (for example, if @in is
- * VIPS_FORMAT_UCHAR but @lut only has 100 elements), the lut is padded out
+ * [enum@Vips.BandFormat.UCHAR] but @lut only has 100 elements), the lut is padded out
  * by copying the last element. Overflows are reported at the end of
  * computation.
  * If @lut is too large, extra values are ignored.
@@ -804,7 +821,11 @@ vips_maplut_init(VipsMaplut *maplut)
  * separately. If @in has one band, then @lut may have many bands and
  * the output will have the same number of bands as @lut.
  *
- * See also: vips_hist_find(), vips_identity().
+ * ::: tip "Optional arguments"
+ *     * @band: `gint`, apply one-band @lut to this band of @in
+ *
+ * ::: seealso
+ *     [method@Image.hist_find], [ctor@Image.identity].
  *
  * Returns: 0 on success, -1 on error
  */

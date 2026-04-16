@@ -73,7 +73,7 @@ extern "C" {
  * The name we use to attach an ICC profile. The file read and write
  * operations for TIFF, JPEG, PNG and others use this item of metadata to
  * attach and save ICC profiles. The profile is updated by the
- * vips_icc_transform() operations.
+ * [method@Image.icc_transform] operations.
  */
 #define VIPS_META_ICC_NAME "icc-profile-data"
 
@@ -117,8 +117,8 @@ extern "C" {
 /**
  * VIPS_META_SEQUENTIAL:
  *
- * Images loaded via vips_sequential() have this int field defined. Some
- * operations (eg. vips_shrinkv()) add extra caches if they see it on their
+ * Images loaded via [method@Image.sequential] have this int field defined. Some
+ * operations (eg. [method@Image.shrinkv]) add extra caches if they see it on their
  * input.
  */
 #define VIPS_META_SEQUENTIAL "vips-sequential"
@@ -129,21 +129,21 @@ extern "C" {
  * The orientation tag for this image. An int from 1 - 8 using the standard
  * exif/tiff meanings.
  *
- * * 1 - The 0th row represents the visual top of the image, and the 0th column
+ * - 1 - The 0th row represents the visual top of the image, and the 0th column
  *   represents the visual left-hand side.
- * * 2 - The 0th row represents the visual top of the image, and the 0th column
+ * - 2 - The 0th row represents the visual top of the image, and the 0th column
  *   represents the visual right-hand side.
- * * 3 - The 0th row represents the visual bottom of the image, and the 0th
+ * - 3 - The 0th row represents the visual bottom of the image, and the 0th
  *   column represents the visual right-hand side.
- * * 4 - The 0th row represents the visual bottom of the image, and the 0th
+ * - 4 - The 0th row represents the visual bottom of the image, and the 0th
  *   column represents the visual left-hand side.
- * * 5 - The 0th row represents the visual left-hand side of the image, and the
+ * - 5 - The 0th row represents the visual left-hand side of the image, and the
  *   0th column represents the visual top.
- * * 6 - The 0th row represents the visual right-hand side of the image, and the
+ * - 6 - The 0th row represents the visual right-hand side of the image, and the
  *   0th column represents the visual top.
- * * 7 - The 0th row represents the visual right-hand side of the image, and the
+ * - 7 - The 0th row represents the visual right-hand side of the image, and the
  *   0th column represents the visual bottom.
- * * 8 - The 0th row represents the visual left-hand side of the image, and the
+ * - 8 - The 0th row represents the visual left-hand side of the image, and the
  *   0th column represents the visual bottom.
  */
 #define VIPS_META_ORIENTATION "orientation"
@@ -178,6 +178,20 @@ extern "C" {
  */
 #define VIPS_META_CONCURRENCY "concurrency"
 
+/**
+ * VIPS_META_TILE_WIDTH
+ *
+ * If set, the width of the tiles for this image.
+ */
+#define VIPS_META_TILE_WIDTH "tile-width"
+
+/**
+ * VIPS_META_TILE_HEIGHT
+ *
+ * If set, the height of the tiles for this image.
+ */
+#define VIPS_META_TILE_HEIGHT "tile-height"
+
 VIPS_API
 guint64 vips_format_sizeof(VipsBandFormat format);
 VIPS_API
@@ -185,6 +199,8 @@ guint64 vips_format_sizeof_unsafe(VipsBandFormat format);
 
 VIPS_API
 double vips_interpretation_max_alpha(VipsInterpretation interpretation);
+VIPS_API
+int vips_interpretation_bands(VipsInterpretation interpretation);
 
 VIPS_API
 int vips_image_get_width(const VipsImage *image);
@@ -232,6 +248,12 @@ VIPS_API
 gboolean vips_image_get_orientation_swap(VipsImage *image);
 VIPS_API
 int vips_image_get_concurrency(VipsImage *image, int default_concurrency);
+VIPS_API
+int vips_image_get_tile_width(VipsImage *image);
+VIPS_API
+int vips_image_get_tile_height(VipsImage *image);
+VIPS_API
+VipsImage *vips_image_get_gainmap(VipsImage *image);
 VIPS_API
 const void *vips_image_get_data(VipsImage *image);
 

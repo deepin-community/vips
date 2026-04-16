@@ -52,7 +52,7 @@
 
 #if defined(HAVE_MAGICK6) || defined(HAVE_MAGICK7)
 
-/* Imagemagick has weak support for some formats --- for example, AVI is
+/* Imagemagick has weak support for some formats -- for example, AVI is
  * delegated to ffmpeg, and just getting the header can take many seconds and
  * many GB of memory.
  *
@@ -137,6 +137,15 @@ magick_sniff(const unsigned char *bytes, size_t length)
 		bytes[3] == 0 &&
 		(bytes[4] != 0 || bytes[5] != 0))
 		return "ICO";
+
+	if (length >= 8 &&
+		bytes[1] == 0 &&
+		bytes[2] == 0 &&
+		bytes[5] == 0 &&
+		bytes[6] == 0 &&
+		(bytes[4] == 7 ||
+		 bytes[7] == 7))
+		return "XWD";
 
 	if (length >= 18 &&
 		(bytes[1] == 0 ||
@@ -654,8 +663,8 @@ magick_optimize_image_layers(Image **images, ExceptionInfo *exception)
 
 	return MagickTrue;
 #else  /*!HAVE_OPTIMIZEPLUSIMAGELAYERS*/
-	g_warning("%s", _("layer optimization is not supported by "
-					  "your version of libMagick"));
+	g_warning("layer optimization is not supported by "
+			  "your version of libMagick");
 
 	return MagickTrue;
 #endif /*HAVE_OPTIMIZEPLUSIMAGELAYERS*/
@@ -670,8 +679,8 @@ magick_optimize_image_transparency(const Image *images,
 
 	return exception->severity == UndefinedException;
 #else  /*!HAVE_OPTIMIZEIMAGETRANSPARENCY*/
-	g_warning("%s", _("transparency optimization is not supported by "
-					  "your version of libMagick"));
+	g_warning("transparency optimization is not supported by "
+			  "your version of libMagick");
 
 	return MagickTrue;
 #endif /*HAVE_OPTIMIZEIMAGETRANSPARENCY*/
