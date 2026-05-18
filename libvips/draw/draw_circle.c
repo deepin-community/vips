@@ -54,6 +54,7 @@
 #include <glib/gi18n-lib.h>
 
 #include <string.h>
+#include <stdint.h>
 
 #include <vips/vips.h>
 #include <vips/internal.h>
@@ -81,7 +82,8 @@ void
 vips__draw_circle_direct(VipsImage *image, int cx, int cy, int r,
 	VipsDrawScanline draw_scanline, void *client)
 {
-	int x, y, d;
+	int x, y;
+	int64_t d;
 
 	y = r;
 	d = 3 - 2 * r;
@@ -93,9 +95,9 @@ vips__draw_circle_direct(VipsImage *image, int cx, int cy, int r,
 		draw_scanline(image, cy - x, cx - y, cx + y, 3, client);
 
 		if (d < 0)
-			d += 4 * x + 6;
+			d += (int64_t) 4 * x + 6;
 		else {
-			d += 4 * (x - y) + 10;
+			d += (int64_t) 4 * (x - y) + 10;
 			y--;
 		}
 	}
@@ -288,18 +290,20 @@ vips_draw_circlev(VipsImage *image,
  * @cx: centre of draw_circle
  * @cy: centre of draw_circle
  * @radius: draw_circle radius
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * Draws a circle on @image.
  *
- * * @fill: fill the draw_circle
- *
- * Draws a circle on @image. If @fill is %TRUE then the circle is filled,
+ * If @fill is `TRUE` then the circle is filled,
  * otherwise a 1-pixel-wide perimeter is drawn.
  *
  * @ink is an array of double containing values to draw.
  *
- * See also: vips_draw_circle1(), vips_draw_line().
+ * ::: tip "Optional arguments"
+ *     * @fill: `gboolean`, fill the draw_circle
+ *
+ * ::: seealso
+ *     [method@Image.draw_circle1], [method@Image.draw_line].
  *
  * Returns: 0 on success, or -1 on error.
  */
@@ -324,15 +328,15 @@ vips_draw_circle(VipsImage *image,
  * @cx: centre of draw_circle
  * @cy: centre of draw_circle
  * @radius: draw_circle radius
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * As [method@Image.draw_circle], but just takes a single double for @ink.
  *
- * * @fill: fill the draw_circle
+ * ::: tip "Optional arguments"
+ *     * @fill: `gboolean`, fill the draw_circle
  *
- * As vips_draw_circle(), but just takes a single double for @ink.
- *
- * See also: vips_draw_circle().
+ * ::: seealso
+ *     [method@Image.draw_circle].
  *
  * Returns: 0 on success, or -1 on error.
  */

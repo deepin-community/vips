@@ -93,20 +93,25 @@ extern "C" {
 #define VIPS_D3250_Y0 (100.0)
 #define VIPS_D3250_Z0 (45.8501)
 
-/* Note: constants align with those defined in lcms2.h.
+/* Note: constants align with those defined in lcms2.h, except for
+ * VIPS_INTENT_AUTO, which is libvips-specific.
  */
 typedef enum {
 	VIPS_INTENT_PERCEPTUAL = 0,
 	VIPS_INTENT_RELATIVE,
 	VIPS_INTENT_SATURATION,
 	VIPS_INTENT_ABSOLUTE,
-	VIPS_INTENT_LAST
+	/* Leave room for possible new rendering intents beyond the
+	 * four standard ones.
+	 */
+	VIPS_INTENT_AUTO = 32,
+	VIPS_INTENT_LAST	/*< skip >*/
 } VipsIntent;
 
 typedef enum {
 	VIPS_PCS_LAB,
 	VIPS_PCS_XYZ,
-	VIPS_PCS_LAST
+	VIPS_PCS_LAST	/*< skip >*/
 } VipsPCS;
 
 VIPS_API
@@ -142,12 +147,6 @@ int vips_LCh2Lab(VipsImage *in, VipsImage **out, ...)
 	G_GNUC_NULL_TERMINATED;
 VIPS_API
 int vips_Lab2LCh(VipsImage *in, VipsImage **out, ...)
-	G_GNUC_NULL_TERMINATED;
-VIPS_API
-int vips_Yxy2Lab(VipsImage *in, VipsImage **out, ...)
-	G_GNUC_NULL_TERMINATED;
-VIPS_API
-int vips_CMC2XYZ(VipsImage *in, VipsImage **out, ...)
 	G_GNUC_NULL_TERMINATED;
 VIPS_API
 int vips_Lab2XYZ(VipsImage *in, VipsImage **out, ...)
@@ -202,6 +201,23 @@ int vips_CMYK2XYZ(VipsImage *in, VipsImage **out, ...)
 	G_GNUC_NULL_TERMINATED;
 VIPS_API
 int vips_XYZ2CMYK(VipsImage *in, VipsImage **out, ...)
+	G_GNUC_NULL_TERMINATED;
+
+VIPS_API
+int vips_Oklab2XYZ(VipsImage *in, VipsImage **out, ...)
+	G_GNUC_NULL_TERMINATED;
+VIPS_API
+int vips_XYZ2Oklab(VipsImage *in, VipsImage **out, ...)
+	G_GNUC_NULL_TERMINATED;
+VIPS_API
+int vips_Oklch2Oklab(VipsImage *in, VipsImage **out, ...)
+	G_GNUC_NULL_TERMINATED;
+VIPS_API
+int vips_Oklab2Oklch(VipsImage *in, VipsImage **out, ...)
+	G_GNUC_NULL_TERMINATED;
+
+VIPS_API
+int vips_uhdr2scRGB(VipsImage *in, VipsImage **out, ...)
 	G_GNUC_NULL_TERMINATED;
 
 VIPS_API

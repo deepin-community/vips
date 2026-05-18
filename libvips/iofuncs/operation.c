@@ -52,28 +52,23 @@
 #include <gobject/gvaluecollector.h>
 
 /**
- * SECTION: operation
- * @short_description: the VIPS operation base object class
- * @stability: Stable
- * @see_also: <link linkend="VipsObject">object</link>
- * @include: vips/vips.h
+ * VipsOperation:
  *
- * The #VipsOperation class and associated types and macros.
+ * An abstract base class for all operations in libvips.
  *
- * #VipsOperation is the base class for all operations in libvips. It builds
- * on #VipsObject to provide the introspection and command-line interface to
- * libvips.
+ * It builds on [class@Object] to provide the introspection and
+ * command-line interface to libvips.
  *
  * It also maintains a cache of recent operations. See below.
  *
- * vips_call(), vips_call_split() and vips_call_split_option_string() are used
- * by vips to implement the C API. They can execute any #VipsOperation,
+ * [func@call], [func@call_split] and [func@call_split_option_string] are used
+ * by vips to implement the C API. They can execute any [class@Operation],
  * passing in a set of required and optional arguments. Normally you would not
  * use these functions directly: every operation has a tiny wrapper function
  * which provides type-safety for the required arguments. For example,
- * vips_embed() is defined as:
+ * [method@Image.embed] is defined as:
  *
- * |[
+ * ```c
  * int
  * vips_embed(VipsImage *in, VipsImage **out,
  *     int x, int y, int width, int height, ...)
@@ -87,38 +82,38 @@
  *
  *     return result;
  * }
- * ]|
+ * ```
  *
- * Use vips_call_argv() to run any vips operation from a command-line style
- * argc/argv array. This is the thing used by the vips main program to
- * implement the vips command-line interface.
+ * Use [func@call_argv] to run any libvips operation from a command-line style
+ * argc/argv array. This is the thing used by the `vips` main program to
+ * implement the command-line interface.
  *
- * ## #VipsOperation and reference counting
+ * ## [class@Operation] and reference counting
  *
- * After calling a #VipsOperation you are responsible for unreffing any output
- * objects. For example, consider:
+ * After calling a [class@Operation] you are responsible for unreffing any
+ * output objects. For example, consider:
  *
- * |[
+ * ```c
  * VipsImage *im = ...;
  * VipsImage *t1;
  *
  * if (vips_invert(im, &t1, NULL))
- *   error ..
- * ]|
+ *     error ..
+ * ```
  *
- * This will invert @im and return a new #VipsImage, @t1. As the caller
- * of vips_invert(), you are responsible for @t1 and must unref it when you no
- * longer need it. If vips_invert() fails, no @t1 is returned and you don't
- * need to do anything.
+ * This will invert `im` and return a new [class@Image], `t1`. As the caller
+ * of [method@Image.invert], you are responsible for `t1` and must unref it
+ * when you no longer need it. If [method@Image.invert] fails, no `t1` is
+ * returned and you don't need to do anything.
  *
- * If you don't need to use @im for another operation,
- * you can unref @im immediately after the call. If @im is needed to calculate
- * @t1, vips_invert() will add a ref to @im and automatically drop it when @t1
- * is unreffed.
+ * If you don't need to use `im` for another operation, you can unref `im`
+ * immediately after the call. If `im` is needed to calculate `t1`,
+ * [method@Image.invert] will add a ref to `im` and automatically drop it when
+ * `t1` is unreffed.
  *
  * Consider running two operations, one after the other. You could write:
  *
- * |[
+ * ```c
  * VipsImage *im = ...;
  * VipsImage *t1, *t2;
  *
@@ -133,42 +128,43 @@
  *     return -1;
  * }
  * g_object_unref(t1);
- * ]|
+ * ```
  *
  * This is correct, but rather long-winded. libvips provides a handy thing to
  * make a vector of auto-freeing object references. You can write this as:
  *
- * |[
+ * ```c
  * VipsObject *parent = ...;
  * VipsImage *im = ...;
  * VipsImage *t = (VipsImage **) vips_object_local_array(parent, 2);
  *
  * if (vips_invert(im, &t[0], NULL) ||
  *     vips_flip(t[0], &t[1], VIPS_DIRECTION_HORIZONTAL, NULL))
- *   return -1;
- * ]|
+ *     return -1;
+ * ```
  *
- * where @parent is some enclosing object which will be unreffed when this
- * task is complete. vips_object_local_array() makes an array of #VipsObject
- * (or #VipsImage, in this case) where when @parent is freed, all non-NULL
- * #VipsObject in the array are also unreffed.
+ * where `parent` is some enclosing object which will be unreffed when this
+ * task is complete. [method@Object.local_array] makes an array of
+ * [class@Object] (or [class@Image], in this case) where when `parent` is
+ * freed, all non-`NULL` [class@Object] in the array are also unreffed.
  *
- * ## The #VipsOperation cache
+ * ## The [class@Operation] cache
  *
- * Because all #VipsObject are immutable, they can be cached. The cache is
- * very simple to use: instead of calling vips_object_build(), call
- * vips_cache_operation_build(). This function calculates a hash from the
- * operations's input arguments and looks it up in table of all recent
+ * Because all [class@Object] are immutable, they can be cached. The cache is
+ * very simple to use: instead of calling [method@Object.build], call
+ * [func@cache_operation_build]. This function calculates a hash from the
+ * operations' input arguments and looks it up in table of all recent
  * operations. If there's a hit, the new operation is unreffed, the old
  * operation reffed, and the old operation returned in place of the new one.
  *
- * The cache size is controlled with vips_cache_set_max() and friends.
+ * The cache size is controlled with [func@cache_set_max] and friends.
  */
 
 /**
  * VipsOperationFlags:
  * @VIPS_OPERATION_NONE: no flags
  * @VIPS_OPERATION_SEQUENTIAL: can work sequentially with a small buffer
+ * @VIPS_OPERATION_SEQUENTIAL_UNBUFFERED: deprecated, use [flags@Vips.OperationFlags.SEQUENTIAL] instead
  * @VIPS_OPERATION_NOCACHE: must not be cached
  * @VIPS_OPERATION_DEPRECATED: a compatibility thing
  * @VIPS_OPERATION_UNTRUSTED: not hardened for untrusted input
@@ -177,9 +173,9 @@
  *
  * Flags we associate with an operation.
  *
- * @VIPS_OPERATION_SEQUENTIAL means that the operation works like vips_conv():
- * it can process images top-to-bottom with only small non-local
- * references.
+ * [flags@Vips.OperationFlags.SEQUENTIAL] means that the operation works like
+ * [method@Image.conv]: it can process images top-to-bottom with only small
+ * non-local references.
  *
  * Every scan-line must be requested, you are not allowed to skip
  * ahead, but as a special case, the very first request can be for a region
@@ -191,23 +187,24 @@
  * not at the top of the image. In this case, the first part of the image will
  * be read and discarded
  *
- * @VIPS_OPERATION_NOCACHE means that the operation must not be cached by
- * vips.
+ * [flags@Vips.OperationFlags.NOCACHE] means that the operation must not be
+ * cached by vips.
  *
- * @VIPS_OPERATION_DEPRECATED means this is an old operation kept in vips for
- * compatibility only and should be hidden from users.
+ * [flags@Vips.OperationFlags.DEPRECATED] means this is an old operation kept
+ * in vips for compatibility only and should be hidden from users.
  *
- * @VIPS_OPERATION_UNTRUSTED means the operation depends on external libraries
- * which have not been hardened against attack. It should probably not be used
- * on untrusted input. Use vips_block_untrusted_set() to block all
- * untrusted operations.
+ * [flags@Vips.OperationFlags.UNTRUSTED] means the operation depends on
+ * external libraries which have not been hardened against attack. It should
+ * probably not be used on untrusted input. Use [func@block_untrusted_set]
+ * to block all untrusted operations.
  *
- * @VIPS_OPERATION_BLOCKED means the operation is prevented from executing. Use
- * vips_operation_block_set() to enable and disable groups of operations.
+ * [flags@Vips.OperationFlags.BLOCKED] means the operation is prevented from
+ * executing. Use [func@Operation.block_set] to enable and disable groups of
+ * operations.
  *
- * @VIPS_OPERATION_REVALIDATE force the operation to run, updating the cache
- * with the new value. This is used by eg. VipsForeignLoad to implement the
- * "revalidate" argument.
+ * [flags@Vips.OperationFlags.REVALIDATE] force the operation to run, updating
+ * the cache with the new value. This is used by eg. VipsForeignLoad to
+ * implement the "revalidate" argument.
  */
 
 /* Abstract base class for operations.
@@ -297,14 +294,9 @@ vips_operation_class_usage_classify(VipsArgumentClass *argument_class)
 /* Display a set of flags as "a:b:c"
  */
 static void
-vips__flags_to_str(VipsBuf *buf, GType type, guint value)
+vips__flags_to_str(VipsBuf *buf, GFlagsClass *flags, guint value)
 {
-	GTypeClass *class = g_type_class_ref(type);
-	GFlagsClass *flags = G_FLAGS_CLASS(class);
-
-	gboolean first;
-
-	first = TRUE;
+	gboolean first = TRUE;
 	for (int i = 0; i < flags->n_values; i++)
 		// can't be 0 (would match everything), and all bits
 		// should match all bits in the value, or "all" would always match
@@ -326,18 +318,14 @@ vips_operation_pspec_usage(VipsBuf *buf, GParamSpec *pspec)
 	/* These are the pspecs that vips uses that have interesting values.
 	 */
 	if (G_IS_PARAM_SPEC_ENUM(pspec)) {
-		GTypeClass *class = g_type_class_ref(type);
+		/* GParamSpecEnum holds a ref on the class so we just peek.
+		 */
+		GEnumClass *genum = g_type_class_peek(type);
 		GParamSpecEnum *pspec_enum = (GParamSpecEnum *) pspec;
 
-		GEnumClass *genum;
 		int i;
 
-		/* Should be impossible, no need to warn.
-		 */
-		if (!class)
-			return;
-
-		genum = G_ENUM_CLASS(class);
+		g_assert(genum);
 
 		vips_buf_appendf(buf, "\t\t\t");
 		vips_buf_appendf(buf, "%s", _("default enum"));
@@ -347,9 +335,7 @@ vips_operation_pspec_usage(VipsBuf *buf, GParamSpec *pspec)
 		vips_buf_appendf(buf, "%s", _("allowed enums"));
 		vips_buf_appendf(buf, ": ");
 
-		/* -1 since we always have a "last" member.
-		 */
-		for (i = 0; i < genum->n_values - 1; i++) {
+		for (i = 0; i < genum->n_values; i++) {
 			if (i > 0)
 				vips_buf_appends(buf, ", ");
 			vips_buf_appends(buf, genum->values[i].value_nick);
@@ -358,23 +344,19 @@ vips_operation_pspec_usage(VipsBuf *buf, GParamSpec *pspec)
 		vips_buf_appendf(buf, "\n");
 	}
 	if (G_IS_PARAM_SPEC_FLAGS(pspec)) {
-		GTypeClass *class = g_type_class_ref(type);
+		/* GParamSpecFlags holds a ref on the class so we just peek.
+		 */
+		GFlagsClass *gflags = g_type_class_peek(type);
 		GParamSpecFlags *pspec_flags = (GParamSpecFlags *) pspec;
 
-		GFlagsClass *gflags;
 		int i;
 
-		/* Should be impossible, no need to warn.
-		 */
-		if (!class)
-			return;
-
-		gflags = G_FLAGS_CLASS(class);
+		g_assert(gflags);
 
 		vips_buf_appendf(buf, "\t\t\t");
 		vips_buf_appendf(buf, "%s", _("default flags"));
 		vips_buf_appendf(buf, ": ");
-		vips__flags_to_str(buf, type, pspec_flags->default_value);
+		vips__flags_to_str(buf, gflags, pspec_flags->default_value);
 		vips_buf_appendf(buf, "\n");
 		vips_buf_appendf(buf, "\t\t\t");
 		vips_buf_appendf(buf, "%s", _("allowed flags"));
@@ -626,6 +608,20 @@ vips_operation_build(VipsObject *object)
 }
 
 static void
+vips_operation_summary_class(VipsObjectClass *object_class, VipsBuf *buf)
+{
+	VipsOperationClass *operation_class = VIPS_OPERATION_CLASS(object_class);
+
+	VIPS_OBJECT_CLASS(vips_operation_parent_class)
+		->summary_class(object_class, buf);
+
+	GType gtype = G_OBJECT_CLASS_TYPE(operation_class);
+	if (!G_TYPE_IS_ABSTRACT(gtype) &&
+		operation_class->flags & VIPS_OPERATION_NOCACHE)
+		vips_buf_appendf(buf, ", nocache");
+}
+
+static void
 vips_operation_summary(VipsObject *object, VipsBuf *buf)
 {
 	VipsOperation *operation = VIPS_OPERATION(object);
@@ -658,6 +654,7 @@ vips_operation_class_init(VipsOperationClass *class)
 	gobject_class->dispose = vips_operation_dispose;
 
 	vobject_class->build = vips_operation_build;
+	vobject_class->summary_class = vips_operation_summary_class;
 	vobject_class->summary = vips_operation_summary;
 	vobject_class->dump = vips_operation_dump;
 	vobject_class->nickname = "operation";
@@ -727,11 +724,11 @@ vips_operation_invalidate(VipsOperation *operation)
  * vips_operation_new: (constructor)
  * @name: nickname of operation to create
  *
- * Return a new #VipsOperation with the specified nickname. Useful for
+ * Return a new [class@Operation] with the specified nickname. Useful for
  * language bindings.
  *
  * You'll need to set any arguments and build the operation before you can use
- * it. See vips_call() for a higher-level way to make new operations.
+ * it. See [func@call] for a higher-level way to make new operations.
  *
  * Returns: (transfer full): the new operation.
  */
@@ -940,8 +937,8 @@ vips_operation_get_valist_optional(VipsOperation *operation, va_list ap)
 /**
  * vips_call_required_optional:
  * @operation: the operation to execute
- * @required: %va_list of required arguments
- * @optional: NULL-terminated %va_list of name / value pairs
+ * @required: `va_list` of required arguments
+ * @optional: `NULL`-terminated `va_list` of name / value pairs
  *
  * This is the main entry point for the C and C++ varargs APIs. @operation
  * is executed, supplying @required and @optional arguments.
@@ -1036,17 +1033,17 @@ vips_call_by_name(const char *operation_name,
 /**
  * vips_call:
  * @operation_name: name of operation to call
- * @...: required args, then a %NULL-terminated list of argument/value pairs
+ * @...: required args, then a `NULL`-terminated list of argument/value pairs
  *
- * vips_call() calls the named operation, passing in required arguments and
+ * [func@call] calls the named operation, passing in required arguments and
  * then setting any optional ones from the remainder of the arguments as a set
  * of name/value pairs.
  *
- * For example, vips_embed() takes six required arguments, @in, @out, @x, @y,
- * @width, @height, and has two optional arguments, @extend and @background.
- * You can run it with vips_call() like this:
+ * For example, [method@Image.embed] takes six required arguments, @in, @out,
+ * @x, @y, @width, @height, and has two optional arguments, @extend and
+ * @background. You can run it with [func@call] like this:
  *
- * |[
+ * ```c
  * VipsImage *in = ...
  * VipsImage *out;
  *
@@ -1054,12 +1051,13 @@ vips_call_by_name(const char *operation_name,
  *         "extend", VIPS_EXTEND_COPY,
  *         NULL))
  *     ... error
- * ]|
+ * ```
  *
- * Normally of course you'd just use the vips_embed() wrapper function and get
+ * Normally of course you'd just use the [method@Image.embed] wrapper function and get
  * type-safety for the required arguments.
  *
- * See also: vips_call_split(), vips_call_options().
+ * ::: seealso
+ *     [func@call_split], [func@call_options].
  *
  * Returns: 0 on success, -1 on error
  */
@@ -1521,10 +1519,10 @@ vips_operation_block_set_operation(VipsOperationClass *class, gboolean *state)
  *
  * For example:
  *
- * |[
+ * ```c
  * vips_operation_block_set("VipsForeignLoad", TRUE);
  * vips_operation_block_set("VipsForeignLoadJpeg", FALSE);
- * ]|
+ * ```
  *
  * Will block all load operations, except JPEG.
  *
@@ -1532,7 +1530,8 @@ vips_operation_block_set_operation(VipsOperationClass *class, gboolean *state)
  *
  * This call does nothing if the named operation is not found.
  *
- * See also: vips_block_untrusted_set().
+ * ::: seealso
+ *     [func@block_untrusted_set].
  */
 void
 vips_operation_block_set(const char *name, gboolean state)

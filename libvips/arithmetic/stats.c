@@ -14,7 +14,7 @@
 31/8/93 JC
 	- forgot to init global max/min properly! sorry.
 21/6/95 JC
-	- still did not init max and min correctly --- now fixed for good
+	- still did not init max and min correctly -- now fixed for good
 
  * 13/1/05
  *	- use 64 bit arithmetic
@@ -109,7 +109,7 @@ vips_stats_build(VipsObject *object)
 	VipsStatistic *statistic = VIPS_STATISTIC(object);
 	VipsStats *stats = (VipsStats *) object;
 
-	gint64 vals, pels;
+	guint64 vals, pels;
 	double *row0, *row;
 	int b, y, i;
 
@@ -127,16 +127,15 @@ vips_stats_build(VipsObject *object)
 	if (VIPS_OBJECT_CLASS(vips_stats_parent_class)->build(object))
 		return -1;
 
-	pels = (gint64) vips_image_get_width(statistic->in) *
-		vips_image_get_height(statistic->in);
-	vals = pels * vips_image_get_bands(statistic->in);
+	pels = VIPS_IMAGE_N_PELS(statistic->ready);
+	vals = pels * vips_image_get_bands(statistic->ready);
 
 	row0 = VIPS_MATRIX(stats->out, 0, 0);
 	row = VIPS_MATRIX(stats->out, 0, 1);
 	for (i = 0; i < COL_LAST; i++)
 		row0[i] = row[i];
 
-	for (b = 1; b < vips_image_get_bands(statistic->in); b++) {
+	for (b = 1; b < vips_image_get_bands(statistic->ready); b++) {
 		row = VIPS_MATRIX(stats->out, 0, b + 1);
 
 		if (row[COL_MIN] < row0[COL_MIN]) {
@@ -160,14 +159,14 @@ vips_stats_build(VipsObject *object)
 
 		row[COL_AVG] = row[COL_SUM] / pels;
 		row[COL_SD] = sqrt(
-			VIPS_FABS(row[COL_SUM2] -
+			fabs(row[COL_SUM2] -
 				(row[COL_SUM] * row[COL_SUM] / pels)) /
 			(pels - 1));
 	}
 
 	row0[COL_AVG] = row0[COL_SUM] / vals;
 	row0[COL_SD] = sqrt(
-		VIPS_FABS(row0[COL_SUM2] -
+		fabs(row0[COL_SUM2] -
 			(row0[COL_SUM] * row0[COL_SUM] / vals)) /
 		(vals - 1));
 
@@ -179,7 +178,7 @@ vips_stats_build(VipsObject *object)
 static int
 vips_stats_stop(VipsStatistic *statistic, void *seq)
 {
-	int bands = vips_image_get_bands(statistic->in);
+	int bands = vips_image_get_bands(statistic->ready);
 	VipsStats *global = (VipsStats *) statistic;
 	VipsStats *local = (VipsStats *) seq;
 
@@ -231,7 +230,7 @@ vips_stats_stop(VipsStatistic *statistic, void *seq)
 static void *
 vips_stats_start(VipsStatistic *statistic)
 {
-	int bands = vips_image_get_bands(statistic->in);
+	int bands = vips_image_get_bands(statistic->ready);
 
 	VipsStats *stats;
 
@@ -382,12 +381,12 @@ static int
 vips_stats_scan(VipsStatistic *statistic, void *seq,
 	int x, int y, void *in, int n)
 {
-	const int bands = vips_image_get_bands(statistic->in);
+	const int bands = vips_image_get_bands(statistic->ready);
 	VipsStats *local = (VipsStats *) seq;
 
 	int b, i;
 
-	switch (vips_image_get_format(statistic->in)) {
+	switch (vips_image_get_format(statistic->ready)) {
 	case VIPS_FORMAT_UCHAR:
 		LOOP(unsigned char);
 		break;
@@ -454,15 +453,15 @@ vips_stats_init(VipsStats *stats)
  * vips_stats: (method)
  * @in: image to scan
  * @out: (out): image of statistics
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Find many image statistics in a single pass through the data. @out is a
- * one-band #VIPS_FORMAT_DOUBLE image of at least 10 columns by n + 1
+ * one-band [enum@Vips.BandFormat.DOUBLE] image of at least 10 columns by n + 1
  * (where n is number of bands in image @in)
  * rows. Columns are statistics, and are, in order: minimum, maximum, sum,
  * sum of squares, mean, standard deviation, x coordinate of minimum, y
  * coordinate of minimum, x coordinate of maximum, y coordinate of maximum.
- * Later versions of vips_stats() may add more columns.
+ * Later versions of [method@Image.stats] may add more columns.
  *
  * Row 0 has statistics for all
  * bands together, row 1 has stats for band 1, and so on.
@@ -470,7 +469,8 @@ vips_stats_init(VipsStats *stats)
  * If there is more than one maxima or minima, one of them will be chosen at
  * random.
  *
- * See also: vips_avg(), vips_min().
+ * ::: seealso
+ *     [method@Image.avg], [method@Image.min].
  *
  * Returns: 0 on success, -1 on error
  */

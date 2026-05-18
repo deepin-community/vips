@@ -140,23 +140,27 @@ vips_extract_area_build(VipsObject *object)
 	VipsConversion *conversion = VIPS_CONVERSION(object);
 	VipsExtractArea *extract = (VipsExtractArea *) object;
 
+	VipsImage *in;
+
 	if (VIPS_OBJECT_CLASS(vips_extract_area_parent_class)->build(object))
 		return -1;
 
-	if (extract->left + extract->width > extract->in->Xsize ||
-		extract->top + extract->height > extract->in->Ysize ||
+	in = extract->in;
+
+	if ((guint64) extract->left + extract->width > in->Xsize ||
+		(guint64) extract->top + extract->height > in->Ysize ||
 		extract->left < 0 || extract->top < 0 ||
 		extract->width <= 0 || extract->height <= 0) {
 		vips_error(class->nickname, "%s", _("bad extract area"));
 		return -1;
 	}
 
-	if (vips_image_pio_input(extract->in) ||
-		vips_check_coding_known(class->nickname, extract->in))
+	if (vips_image_pio_input(in) ||
+		vips_check_coding_known(class->nickname, in))
 		return -1;
 
 	if (vips_image_pipelinev(conversion->out,
-			VIPS_DEMAND_STYLE_THINSTRIP, extract->in, NULL))
+			VIPS_DEMAND_STYLE_THINSTRIP, in, NULL))
 		return -1;
 
 	conversion->out->Xsize = extract->width;
@@ -166,7 +170,7 @@ vips_extract_area_build(VipsObject *object)
 
 	if (vips_image_generate(conversion->out,
 			vips_start_one, vips_extract_area_gen, vips_stop_one,
-			extract->in, extract))
+			in, extract))
 		return -1;
 
 	return 0;
@@ -246,11 +250,12 @@ vips_extract_area_init(VipsExtractArea *extract)
  * @top: top edge of area to extract
  * @width: width of area to extract
  * @height: height of area to extract
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Extract an area from an image. The area must fit within @in.
  *
- * See also: vips_extract_bands(), vips_smartcrop().
+ * ::: seealso
+ *     [method@Image.extract_band], [method@Image.smartcrop].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -304,11 +309,12 @@ vips_crop_get_type(void)
  * @top: top edge of area to extract
  * @width: width of area to extract
  * @height: height of area to extract
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * A synonym for vips_extract_area().
+ * A synonym for [method@Image.extract_area].
  *
- * See also: vips_extract_bands(), vips_smartcrop().
+ * ::: seealso
+ *     [method@Image.extract_band], [method@Image.smartcrop].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -393,7 +399,7 @@ vips_extract_band_build(VipsObject *object)
 		bandary->in = &extract->in;
 		bandary->out_bands = extract->n;
 
-		if (extract->band + extract->n > bands) {
+		if ((guint64) extract->band + extract->n > bands) {
 			vips_error(class->nickname,
 				"%s", _("bad extract band"));
 			return -1;
@@ -459,16 +465,18 @@ vips_extract_band_init(VipsExtractBand *extract)
  * vips_extract_band: (method)
  * @in: input image
  * @out: (out): output image
- * @band: band to extract
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @n: number of bands to extract
+ * @band: index of first band to extract
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Extract a band or bands from an image. Extracting out of range is an error.
  *
- * See also: vips_extract_area().
+ * @n defaults to 1.
+ *
+ * ::: tip "Optional arguments"
+ *     * @n: `gint`, number of bands to extract
+ *
+ * ::: seealso
+ *     [method@Image.extract_area].
  *
  * Returns: 0 on success, -1 on error.
  */

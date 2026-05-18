@@ -52,6 +52,7 @@
 #include <stdio.h>
 
 #include <vips/vips.h>
+#include <vips/internal.h>
 
 #include "pcolour.h"
 
@@ -108,8 +109,8 @@ vips_LabS2LabQ_line(VipsColour *colour, VipsPel *out, VipsPel **in, int width)
 
 		/* Form extension byte.
 		 */
-		ext = (l << 6) & 0xc0;
-		ext |= (a << 3) & 0x38;
+		ext = VIPS_LSHIFT_INT(l, 6) & 0xc0;
+		ext |= VIPS_LSHIFT_INT(a, 3) & 0x38;
 		ext |= b & 0x7;
 		q[3] = ext;
 
@@ -149,11 +150,12 @@ vips_LabS2LabQ_init(VipsLabS2LabQ *LabS2LabQ)
  * vips_LabS2LabQ: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Convert a LabS three-band signed short image to LabQ
  *
- * See also: vips_LabQ2LabS().
+ * ::: seealso
+ *     [method@Image.LabQ2LabS].
  *
  * Returns: 0 on success, -1 on error.
  */

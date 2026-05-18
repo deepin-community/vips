@@ -90,6 +90,7 @@ $ vips im_max abs.v
 
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <math.h>
@@ -310,6 +311,7 @@ vips_conva_decompose_hlines(VipsConva *conva)
 	double max;
 	double min;
 	double depth;
+	int layers;
 	int layers_above;
 	int layers_below;
 	int z, n, x, y;
@@ -331,10 +333,10 @@ vips_conva_decompose_hlines(VipsConva *conva)
 	 * fixed n-lines which includes any negative parts.
 	 */
 	depth = (max - min) / conva->layers;
-	layers_above = VIPS_CEIL(max / depth);
+	layers_above = ceil(max / depth);
 	depth = max / layers_above;
-	layers_below = VIPS_FLOOR(min / depth);
-	conva->layers = layers_above - layers_below;
+	layers_below = floor(min / depth);
+	layers = VIPS_CLIP(1, (int64_t) layers_above - layers_below, 1000);
 
 	VIPS_DEBUG_MSG("vips_conva_decompose_hlines: depth = %g, layers = %d\n",
 		depth, conva->layers);
@@ -342,7 +344,7 @@ vips_conva_decompose_hlines(VipsConva *conva)
 	/* For each layer, generate a set of lines which are inside the
 	 * perimeter. Work down from the top.
 	 */
-	for (z = 0; z < conva->layers; z++) {
+	for (z = 0; z < layers; z++) {
 		/* How deep we are into the mask, as a double we can test
 		 * against. Add half the layer depth so we can easily find >50%
 		 * mask elements.
@@ -744,7 +746,7 @@ vips_conva_decompose_boxes(VipsConva *conva)
 	for (z = 0; z < size; z++)
 		sum += fabs(coeff[z]);
 
-	conva->divisor = VIPS_RINT(area * scale / sum);
+	conva->divisor = VIPS_MAX(1, rint(area * scale / sum));
 	conva->rounding = (conva->divisor + 1) / 2;
 	conva->offset = offset;
 
@@ -983,7 +985,7 @@ vips_conva_horizontal(VipsConva *conva, VipsImage *in, VipsImage **out)
 {
 	VipsObjectClass *class = VIPS_OBJECT_GET_CLASS(conva);
 
-	/* Prepare output. Consider a 7x7 mask and a 7x7 image --- the output
+	/* Prepare output. Consider a 7x7 mask and a 7x7 image -- the output
 	 * would be 1x1.
 	 */
 	*out = vips_image_new();
@@ -1081,8 +1083,7 @@ vips_conva_horizontal(VipsConva *conva, VipsImage *in, VipsImage **out)
 				seq_sum[z] = 0; \
 				for (k = conva->vline[z].start; \
 					 k < conva->vline[z].end; k++) \
-					seq_sum[z] += p[k * istride + \
-						conva->vline[z].band]; \
+					seq_sum[z] += p[k * istride + conva->vline[z].band]; \
 				sum += conva->vline[z].factor * seq_sum[z]; \
 			} \
 			sum = (sum + conva->rounding) / conva->divisor + conva->offset; \
@@ -1164,29 +1165,23 @@ vips_conva_vgenerate(VipsRegion *out_region,
 	switch (convolution->in->BandFmt) {
 	case VIPS_FORMAT_UCHAR:
 		if (conva->max_line < 256)
-			VCONV(unsigned int,
-				unsigned short, unsigned char, CLIP_UCHAR);
+			VCONV(unsigned int, unsigned short, unsigned char, CLIP_UCHAR);
 		else
-			VCONV(unsigned int,
-				unsigned int, unsigned char, CLIP_UCHAR);
+			VCONV(unsigned int, unsigned int, unsigned char, CLIP_UCHAR);
 		break;
 
 	case VIPS_FORMAT_CHAR:
 		if (conva->max_line < 256)
-			VCONV(signed int,
-				signed short, signed char, CLIP_CHAR);
+			VCONV(signed int, signed short, signed char, CLIP_CHAR);
 		else
-			VCONV(signed int,
-				signed int, signed char, CLIP_CHAR);
+			VCONV(signed int, signed int, signed char, CLIP_CHAR);
 		break;
 
 	case VIPS_FORMAT_USHORT:
 		if (conva->max_line < 256)
-			VCONV(unsigned int,
-				unsigned short, unsigned short, CLIP_USHORT);
+			VCONV(unsigned int, unsigned short, unsigned short, CLIP_USHORT);
 		else
-			VCONV(unsigned int,
-				unsigned int, unsigned short, CLIP_USHORT);
+			VCONV(unsigned int, unsigned int, unsigned short, CLIP_USHORT);
 		break;
 
 	case VIPS_FORMAT_SHORT:
@@ -1233,7 +1228,7 @@ vips_conva_vertical(VipsConva *conva, VipsImage *in, VipsImage **out)
 	VipsObjectClass *class = VIPS_OBJECT_GET_CLASS(conva);
 	VipsConvolution *convolution = (VipsConvolution *) conva;
 
-	/* Prepare output. Consider a 7x7 mask and a 7x7 image --- the output
+	/* Prepare output. Consider a 7x7 mask and a 7x7 image -- the output
 	 * would be 1x1.
 	 */
 	*out = vips_image_new();
@@ -1346,19 +1341,14 @@ vips_conva_init(VipsConva *conva)
  * @in: input image
  * @out: (out): output image
  * @mask: convolution mask
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @layers: %gint, number of layers for approximation
- * * @cluster: %gint, cluster lines closer than this distance
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Perform an approximate integer convolution of @in with @mask.
- * This is a low-level operation, see
- * vips_conv() for something more convenient.
+ * This is a low-level operation, see [method@Image.conv] for something more
+ * convenient.
  *
  * The output image
- * always has the same #VipsBandFormat as the input image.
+ * always has the same [enum@BandFormat] as the input image.
  * Elements of @mask are converted to
  * integers before convolution.
  *
@@ -1371,7 +1361,12 @@ vips_conva_init(VipsConva *conva)
  * Smaller values of @cluster will give more accurate results, but be slower
  * and use more memory. 10% of the mask radius is a good rule of thumb.
  *
- * See also: vips_conv().
+ * ::: tip "Optional arguments"
+ *     * @layers: `gint`, number of layers for approximation
+ *     * @cluster: `gint`, cluster lines closer than this distance
+ *
+ * ::: seealso
+ *     [method@Image.conv].
  *
  * Returns: 0 on success, -1 on error
  */

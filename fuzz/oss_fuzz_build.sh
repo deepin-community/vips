@@ -43,7 +43,7 @@ popd
 # lcms
 pushd $SRC/lcms
 meson setup build --prefix=$WORK --libdir=lib --default-library=static --buildtype=debugoptimized \
-  -Djpeg=disabled -Dtiff=disabled
+  -Dtests=disabled -Djpeg=disabled -Dtiff=disabled
 meson install -C build --tag devel
 popd
 
@@ -94,17 +94,23 @@ cmake \
   -DENABLE_STATIC=TRUE \
   -DENABLE_SHARED=FALSE \
   -DWITH_TURBOJPEG=FALSE \
+  -DWITH_TOOLS=FALSE \
+  -DWITH_TESTS=FALSE \
   .
-cmake --build . --target jpeg-static
-cmake --install . --component lib
-cmake --install . --component include
+cmake --build . --target install
 popd
 
-# libspng
-pushd $SRC/libspng
-meson setup build --prefix=$WORK --libdir=lib --default-library=static --buildtype=debugoptimized \
-  -Dstatic_zlib=true
-meson install -C build --tag devel
+# libpng
+pushd $SRC/libpng
+autoreconf -fi
+./configure \
+  --prefix=$WORK \
+  --disable-shared \
+  --disable-tools \
+  --without-binconfigs \
+  --disable-unversioned-libpng-config \
+  --disable-dependency-tracking
+make install dist_man_MANS=
 popd
 
 # libwebp
@@ -148,7 +154,8 @@ popd
 
 # cgif
 pushd $SRC/cgif
-meson setup build --prefix=$WORK --libdir=lib --default-library=static --buildtype=debugoptimized
+meson setup build --prefix=$WORK --libdir=lib --default-library=static --buildtype=debugoptimized \
+  -Dexamples=false -Dtests=false
 meson install -C build --tag devel
 popd
 
@@ -183,6 +190,46 @@ cmake \
   -DHWY_ENABLE_CONTRIB=0 \
   -DHWY_ENABLE_EXAMPLES=0 \
   -DHWY_ENABLE_TESTS=0 \
+  .
+cmake --build . --target install
+popd
+
+# libjxl
+pushd $SRC/libjxl
+# libvips always decodes to pixels, so build with
+# -DJPEGXL_ENABLE_TRANSCODE_JPEG=FALSE
+cmake \
+  -GNinja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=$WORK \
+  -DCMAKE_FIND_ROOT_PATH=$WORK \
+  -DBUILD_SHARED_LIBS=FALSE \
+  -DBUILD_TESTING=FALSE \
+  -DJPEGXL_ENABLE_BENCHMARK=FALSE \
+  -DJPEGXL_ENABLE_EXAMPLES=FALSE \
+  -DJPEGXL_ENABLE_FUZZERS=FALSE \
+  -DJPEGXL_ENABLE_JPEGLI=FALSE \
+  -DJPEGXL_ENABLE_MANPAGES=FALSE \
+  -DJPEGXL_ENABLE_SJPEG=FALSE \
+  -DJPEGXL_ENABLE_SKCMS=FALSE \
+  -DJPEGXL_ENABLE_TOOLS=FALSE \
+  -DJPEGXL_ENABLE_TRANSCODE_JPEG=FALSE \
+  -DJPEGXL_FORCE_SYSTEM_BROTLI=TRUE \
+  -DJPEGXL_FORCE_SYSTEM_HWY=TRUE \
+  -DJPEGXL_FORCE_SYSTEM_LCMS2=TRUE \
+  .
+cmake --build . --target install
+popd
+
+# libultrahdr
+pushd $SRC/libultrahdr
+cmake \
+  -GNinja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=$WORK \
+  -DBUILD_SHARED_LIBS=FALSE \
+  -DUHDR_BUILD_EXAMPLES=FALSE \
+  -DUHDR_MAX_DIMENSION=65500 \
   .
 cmake --build . --target install
 popd

@@ -196,6 +196,7 @@ vips_rad2float_init(VipsRad2float *rad2float)
 	colour->interpretation = VIPS_INTERPRETATION_scRGB;
 	colour->format = VIPS_FORMAT_FLOAT;
 	colour->bands = 3;
+	colour->input_bands = 4;
 
 	code->input_coding = VIPS_CODING_RAD;
 }
@@ -204,11 +205,12 @@ vips_rad2float_init(VipsRad2float *rad2float)
  * vips_rad2float: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Unpack a RAD (#VIPS_CODING_RAD) image to a three-band float image.
+ * Unpack a RAD ([enum@Vips.Coding.RAD]) image to a three-band float image.
  *
- * See also: vips_float2rad(), vips_LabQ2LabS().
+ * ::: seealso
+ *     [method@Image.float2rad], [method@Image.LabQ2LabS].
  *
  * Returns: 0 on success, -1 on error.
  */

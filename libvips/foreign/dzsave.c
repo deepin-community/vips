@@ -98,6 +98,8 @@
  *	- add dzsave_target
  * 8/9/23
  *	- add direct mode
+ * 24/11/25
+ *	- add gainmap support
  */
 
 /*
@@ -303,7 +305,7 @@ struct _VipsForeignSaveDz {
 
 	/* Count zoomify tiles we write.
 	 */
-	int tile_count;
+	int tile_count; // (atomic)
 
 	/* Where we write ... can be the filesystem, or a zip.
 	 */
@@ -332,6 +334,16 @@ struct _VipsForeignSaveDz {
 	 * saving .. used to test for blank tiles.
 	 */
 	VipsPel *ink;
+
+	/* The gainmap, if this image has one. Workers shrink and crop this during
+	 * tile save.
+	 */
+	VipsImage *gainmap;
+
+	/* Scale main image cods by this to get gainmap cods.
+	 */
+	double gainmap_hscale;
+	double gainmap_vscale;
 };
 
 typedef VipsForeignSaveClass VipsForeignSaveDzClass;
@@ -408,6 +420,7 @@ vips_foreign_save_dz_dispose(GObject *gobject)
 
 	VIPS_FREEF(vips__archive_free, dz->archive);
 	VIPS_UNREF(dz->target);
+	VIPS_UNREF(dz->gainmap);
 
 	VIPS_FREEF(level_free, dz->level);
 
@@ -623,7 +636,7 @@ write_properties(VipsForeignSaveDz *dz)
 							"TILESIZE=\"%d\" />\n",
 		dz->level->width,
 		dz->level->height,
-		dz->tile_count,
+		g_atomic_int_get(&dz->tile_count),
 		dz->tile_size);
 
 	if ((buf = vips_dbuf_steal(&dbuf, &len))) {
@@ -776,11 +789,11 @@ write_json(VipsForeignSaveDz *dz)
 		"    {\n"
 		"      \"scaleFactors\": [\n");
 
-	for (i = 0; i < dz->level->n; i++) {
+	for (i = 0; i <= dz->level->n; i++) {
 		vips_dbuf_writef(&dbuf,
 			"        %d",
 			1 << i);
-		if (i != dz->level->n - 1)
+		if (i != dz->level->n)
 			vips_dbuf_writef(&dbuf, ",");
 		vips_dbuf_writef(&dbuf, "\n");
 	}
@@ -1183,7 +1196,7 @@ tile_name(Level *level, int x, int y)
 
 		/* Used at the end in ImageProperties.xml
 		 */
-		dz->tile_count += 1;
+		g_atomic_int_inc(&dz->tile_count);
 
 		break;
 
@@ -1212,6 +1225,9 @@ tile_name(Level *level, int x, int y)
 			save->ready->Xsize - left);
 		int height = VIPS_MIN(dz->tile_size * level->sub,
 			save->ready->Ysize - top);
+		gboolean is_region_full = left == 0 && top == 0 &&
+			width == save->ready->Xsize &&
+			height == save->ready->Ysize;
 
 		/* Rotation is always 0.
 		 */
@@ -1223,11 +1239,17 @@ tile_name(Level *level, int x, int y)
 			int ysize = VIPS_MIN(dz->tile_size,
 				level->height - y * dz->tile_size);
 
-			g_snprintf(subdir, VIPS_PATH_MAX,
-				"%d,%d,%d,%d" G_DIR_SEPARATOR_S "%d,%d" G_DIR_SEPARATOR_S "%d",
-				left, top, width, height,
-				xsize, ysize,
-				rotation);
+			if (is_region_full)
+				g_snprintf(subdir, VIPS_PATH_MAX,
+					"full" G_DIR_SEPARATOR_S "%d,%d" G_DIR_SEPARATOR_S "%d",
+					xsize, ysize,
+					rotation);
+			else
+				g_snprintf(subdir, VIPS_PATH_MAX,
+					"%d,%d,%d,%d" G_DIR_SEPARATOR_S "%d,%d" G_DIR_SEPARATOR_S "%d",
+					left, top, width, height,
+					xsize, ysize,
+					rotation);
 		}
 		else {
 			/* IIIF2 "size" is just real tile width, I think.
@@ -1235,11 +1257,17 @@ tile_name(Level *level, int x, int y)
 			int size = VIPS_MIN(dz->tile_size,
 				level->width - x * dz->tile_size);
 
-			g_snprintf(subdir, VIPS_PATH_MAX,
-				"%d,%d,%d,%d" G_DIR_SEPARATOR_S "%d," G_DIR_SEPARATOR_S "%d",
-				left, top, width, height,
-				size,
-				rotation);
+			if (is_region_full)
+				g_snprintf(subdir, VIPS_PATH_MAX,
+					"full" G_DIR_SEPARATOR_S "%d," G_DIR_SEPARATOR_S "%d",
+					size,
+					rotation);
+			else
+				g_snprintf(subdir, VIPS_PATH_MAX,
+					"%d,%d,%d,%d" G_DIR_SEPARATOR_S "%d," G_DIR_SEPARATOR_S "%d",
+					left, top, width, height,
+					size,
+					rotation);
 		}
 
 		g_snprintf(name, VIPS_PATH_MAX, "default%s", dz->file_suffix);
@@ -1288,7 +1316,7 @@ region_tile_equal(VipsRegion *region, VipsRect *rect,
 
 		for (x = 0; x < rect->width; x++) {
 			for (b = 0; b < bytes; b++)
-				if (VIPS_ABS(p[b] - ink[b]) > threshold)
+				if (abs(p[b] - ink[b]) > threshold)
 					return FALSE;
 
 			p += bytes;
@@ -1375,19 +1403,46 @@ image_strip_work(VipsThreadState *state, void *a)
 
 	if (dz->skip_blanks >= 0 &&
 		image_tile_equal(x, dz->skip_blanks, dz->ink)) {
-		g_object_unref(x);
-
 #ifdef DEBUG_VERBOSE
 		printf("image_strip_work: skipping blank tile %d x %d\n",
 			tile_x, tile_y);
 #endif /*DEBUG_VERBOSE*/
 
+		VIPS_UNREF(x);
 		return 0;
 	}
 
-	if (!(out = tile_name(level, tile_x, tile_y))) {
-		g_object_unref(x);
+	/* If there's a gainmap, generate and attach that too.
+	 */
+	if (dz->gainmap) {
+		VipsImage *a, *b;
 
+		if (vips_resize(dz->gainmap, &a, 1.0 / level->sub,
+			"vscale", 1.0 / level->sub,
+			"kernel", VIPS_KERNEL_LINEAR,
+			NULL)) {
+			VIPS_UNREF(x);
+			return -1;
+		}
+
+		int left = dz->gainmap_hscale * tile_x * dz->tile_size;
+		int top = dz->gainmap_vscale * tile_y * dz->tile_size;
+		int width = VIPS_MAX(1, dz->gainmap_hscale * state->pos.width);
+		int height = VIPS_MAX(1, dz->gainmap_vscale * state->pos.height);
+		if (vips_extract_area(a, &b, left, top, width, height, NULL)) {
+			VIPS_UNREF(a);
+			VIPS_UNREF(x);
+			return -1;
+		}
+		VIPS_UNREF(a);
+
+		vips_image_set_image(x, "gainmap", b);
+
+		VIPS_UNREF(b);
+	}
+
+	if (!(out = tile_name(level, tile_x, tile_y))) {
+		VIPS_UNREF(x);
 		return -1;
 	}
 
@@ -1397,14 +1452,14 @@ image_strip_work(VipsThreadState *state, void *a)
 	vips_image_set_int(x, VIPS_META_CONCURRENCY, 1);
 
 	if (write_image(dz, x, out, dz->suffix)) {
-		g_free(out);
-		g_object_unref(x);
+		VIPS_FREE(out);
+		VIPS_UNREF(x);
 
 		return -1;
 	}
 
-	g_free(out);
-	g_object_unref(x);
+	VIPS_FREE(out);
+	VIPS_UNREF(x);
 
 #ifdef DEBUG_VERBOSE
 	printf("image_strip_work: success\n");
@@ -1418,10 +1473,39 @@ image_strip_work(VipsThreadState *state, void *a)
 typedef struct _DirectStrip {
 	Level *level;
 
+	/* Private image for this strip write.
+	 */
+	VipsImage *image;
+
 	/* Allocate the next tile on this boundary.
 	 */
 	int x;
 } DirectStrip;
+
+static int
+direct_strip_init(DirectStrip *strip, Level *level)
+{
+	strip->level = level;
+	strip->x = 0;
+
+	/* We need a private image so we can modify the metadata.
+	 */
+	if (vips_copy(level->image, &strip->image, NULL))
+		return -1;
+
+	/* We don't want threadpool_run to minimise on completion -- we need to
+	 * keep the cache on the pipeline before us.
+	 */
+	vips_image_set_int(strip->image, "vips-no-minimise", 1);
+
+	return 0;
+}
+
+static void
+direct_strip_free(DirectStrip *strip)
+{
+	VIPS_UNREF(strip->image);
+}
 
 static int
 direct_strip_allocate(VipsThreadState *state, void *a, gboolean *stop)
@@ -1471,8 +1555,7 @@ direct_strip_allocate(VipsThreadState *state, void *a, gboolean *stop)
 
 static int
 direct_image_write(VipsForeignSaveDz *dz,
-	VipsRegion *region, VipsRect *rect,
-	const char *filename)
+	VipsRegion *region, VipsRect *rect, const char *filename)
 {
 	VipsForeignSave *save = VIPS_FOREIGN_SAVE(dz);
 	VipsTarget *target;
@@ -1575,20 +1658,22 @@ strip_save(Level *level)
 #endif /*DEBUG_VERBOSE*/
 
 	if (level->dz->direct) {
-		DirectStrip strip = { level, 0 };
+		DirectStrip strip;
 
-		/* We don't want threadpoolrun to minimise on completion -- we need to
-		 * keep the cache on the pipeline before us.
-		 */
-		vips_image_set_int(level->image, "vips-no-minimise", 1);
+		if (direct_strip_init(&strip, level))
+			return -1;
 
-		if (vips_threadpool_run(level->image,
+		if (vips_threadpool_run(strip.image,
 				vips_thread_state_new,
 				direct_strip_allocate,
 				direct_strip_work,
 				NULL,
-				&strip))
+				&strip)) {
+			direct_strip_free(&strip);
 			return -1;
+		}
+
+		direct_strip_free(&strip);
 	}
 	else {
 		ImageStrip strip;
@@ -2009,21 +2094,6 @@ vips_foreign_save_dz_build(VipsObject *object)
 		return -1;
 	}
 
-	/* Default to white background. vips_foreign_save_init() defaults to
-	 * black.
-	 */
-	if (!vips_object_argument_isset(object, "background")) {
-		VipsArrayDouble *background;
-
-		/* Using g_object_set() to set an input param in build will
-		 * change the hash and confuse caching, but we don't cache
-		 * savers, so it's fine.
-		 */
-		background = vips_array_double_newv(1, 255.0);
-		g_object_set(object, "background", background, NULL);
-		vips_area_unref(VIPS_AREA(background));
-	}
-
 	/* DeepZoom stops at 1x1 pixels, others when the image fits within a
 	 * tile.
 	 */
@@ -2062,29 +2132,16 @@ vips_foreign_save_dz_build(VipsObject *object)
 	 */
 	if (dz->direct) {
 		VipsImage *z;
-		gboolean coding[VIPS_CODING_LAST];
-
-		for (int i = 0; i < VIPS_CODING_LAST; i++)
-			coding[i] = FALSE;
-		coding[VIPS_CODING_NONE] = TRUE;
 
 		if (vips__foreign_convert_saveable(save->ready, &z,
-			VIPS_SAVEABLE_RGB_CMYK, bandfmt_dzsave, coding,
-			save->background))
+			VIPS_FOREIGN_SAVEABLE_MONO |
+				VIPS_FOREIGN_SAVEABLE_RGB |
+				VIPS_FOREIGN_SAVEABLE_CMYK,
+			bandfmt_dzsave, VIPS_FOREIGN_CODING_NONE, save->background))
 			return -1;
 
 		VIPS_UNREF(save->ready);
 		save->ready = z;
-	}
-
-	/* We use ink to check for blank tiles.
-	 */
-	if (dz->skip_blanks >= 0) {
-		if (!(dz->ink = vips__vector_to_ink(
-				  class->nickname, save->ready,
-				  VIPS_AREA(save->background)->data, NULL,
-				  VIPS_AREA(save->background)->n)))
-			return -1;
 	}
 
 	/* The real (not background) pixels we have. save->ready can be a lot
@@ -2094,6 +2151,30 @@ vips_foreign_save_dz_build(VipsObject *object)
 	save_area.top = 0;
 	save_area.width = save->ready->Xsize;
 	save_area.height = save->ready->Ysize;
+
+	/* Load the gainmap, if any.
+	 */
+	if ((dz->gainmap = vips_image_get_gainmap(save->ready))) {
+		dz->gainmap_hscale = (double) dz->gainmap->Xsize / save->ready->Xsize;
+		dz->gainmap_vscale = (double) dz->gainmap->Ysize / save->ready->Ysize;
+
+		/* Don't check for blanks, too annoying with a gainmap as well.
+		 */
+		dz->skip_blanks = -1;
+
+		/* Direct mode does not support gainmaps.
+		 */
+		dz->direct = FALSE;
+	}
+
+	/* We use ink to check for blank tiles.
+	 */
+	if (dz->skip_blanks >= 0) {
+		if (!(dz->ink = vips__vector_to_ink(class->nickname, save->ready,
+				VIPS_AREA(save->background)->data, NULL,
+				VIPS_AREA(save->background)->n)))
+			return -1;
+	}
 
 	/* In google mode, we expand the image so we have complete tiles in every
 	 * level. We shrink to fit in one tile, then expand those dimensions out
@@ -2148,7 +2229,28 @@ vips_foreign_save_dz_build(VipsObject *object)
 
 		VIPS_UNREF(save->ready);
 		save->ready = z;
+
+		if (dz->gainmap) {
+			if (vips_embed(dz->gainmap, &z,
+				save_area.left * dz->gainmap_hscale,
+				save_area.top * dz->gainmap_vscale,
+				width * dz->gainmap_hscale,
+				height * dz->gainmap_vscale,
+				"background", save->background,
+				NULL))
+				return -1;
+
+			VIPS_UNREF(dz->gainmap);
+			dz->gainmap = z;
+		}
 	}
+
+	/* Force gainmap decode -- we don't want to delay this until first tile
+	 * write.
+	 */
+	if (dz->gainmap &&
+		vips_image_wio_input(dz->gainmap))
+		return -1;
 
 #ifdef DEBUG
 	printf("vips_foreign_save_dz_build: tile_size == %d\n", dz->tile_size);
@@ -2336,9 +2438,9 @@ vips_foreign_save_dz_class_init(VipsForeignSaveDzClass *class)
 
 	foreign_class->suffs = dz_suffs;
 
-	save_class->saveable = VIPS_SAVEABLE_ANY;
+	save_class->saveable = VIPS_FOREIGN_SAVEABLE_ANY;
 	save_class->format_table = bandfmt_dz;
-	save_class->coding[VIPS_CODING_LABQ] = TRUE;
+	save_class->coding |= VIPS_FOREIGN_CODING_LABQ;
 
 	VIPS_ARG_STRING(class, "imagename", 2,
 		_("Image name"),
@@ -2499,6 +2601,12 @@ vips_foreign_save_dz_init(VipsForeignSaveDz *dz)
 	dz->region_shrink = VIPS_REGION_SHRINK_MEAN;
 	dz->skip_blanks = -1;
 	dz->Q = 75;
+
+	// we default background to 255 (not 0), see vips_foreign_save_init()
+	VipsForeignSave *save = (VipsForeignSave *) dz;
+	if (save->background)
+		vips_area_unref(VIPS_AREA(save->background));
+	save->background = vips_array_double_newv(1, 255.0);
 }
 
 typedef struct _VipsForeignSaveDzTarget {
@@ -2522,11 +2630,8 @@ vips_foreign_save_dz_target_build(VipsObject *object)
 	dz->target = target->target;
 	g_object_ref(dz->target);
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_dz_target_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_save_dz_target_parent_class)
+		->build(object);
 }
 
 static void
@@ -2582,11 +2687,8 @@ vips_foreign_save_dz_file_build(VipsObject *object)
 
 	dz->filename = file->filename;
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_save_dz_file_parent_class)
-			->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_save_dz_file_parent_class)
+		->build(object);
 }
 
 static void
@@ -2685,32 +2787,14 @@ vips_foreign_save_dz_buffer_init(VipsForeignSaveDzBuffer *buffer)
  * vips_dzsave: (method)
  * @in: image to save
  * @name: name to save to
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @basename: %gchar base part of name
- * * @layout: #VipsForeignDzLayout directory layout convention
- * * @suffix: %gchar suffix for tiles
- * * @overlap: %gint set tile overlap
- * * @tile_size: %gint set tile size
- * * @background: #VipsArrayDouble background colour
- * * @depth: #VipsForeignDzDepth how deep to make the pyramid
- * * @centre: %gboolean centre the tiles
- * * @angle: #VipsAngle rotate the image by this much
- * * @container: #VipsForeignDzContainer set container type
- * * @compression: %gint zip deflate compression level
- * * @region_shrink: #VipsRegionShrink how to shrink each 2x2 region
- * * @skip_blanks: %gint skip tiles which are nearly equal to the background
- * * @id: %gchar id for IIIF properties
- * * @Q: %gint, quality factor
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Save an image as a set of tiles at various resolutions. By default dzsave
  * uses DeepZoom layout -- use @layout to pick other conventions.
  *
- * vips_dzsave() creates a directory called @name to hold the tiles. If @name
- * ends `.zip`, vips_dzsave() will create a zip file called @name to hold the
- * tiles. You can use @container to force zip file output.
+ * [method@Image.dzsave] creates a directory called @name to hold the tiles.
+ * If @name ends `.zip`, [method@Image.dzsave] will create a zip file called
+ * @name to hold the tiles. You can use @container to force zip file output.
  *
  * Use @basename to set the name of the image we are creating. The
  * default value is set from @name.
@@ -2737,7 +2821,7 @@ vips_foreign_save_dz_buffer_init(VipsForeignSaveDzBuffer *buffer)
  * You can rotate the image during write with the @angle argument. However,
  * this will only work for images which support random access, like openslide,
  * and not for things like JPEG. You'll need to rotate those images
- * yourself with vips_rot(). Note that the `autorotate` option to the loader
+ * yourself with [method@Image.rot]. Note that the `autorotate` option to the loader
  * may do what you need.
  *
  * By default, all tiles are stripped since usually you do not want a copy of
@@ -2759,9 +2843,28 @@ vips_foreign_save_dz_buffer_init(VipsForeignSaveDzBuffer *buffer)
  * In IIIF layout, you can set the base of the `id` property in `info.json`
  * with @id. The default is `https://example.com/iiif`.
  *
- * Use @layout #VIPS_FOREIGN_DZ_LAYOUT_IIIF3 for IIIF v3 layout.
+ * Use @layout [enum@Vips.ForeignDzLayout.IIIF3] for IIIF v3 layout.
  *
- * See also: vips_tiffsave().
+ * ::: tip "Optional arguments"
+ *     * @basename: `gchararray`, base part of name
+ *     * @layout: [enum@ForeignDzLayout], directory layout convention
+ *     * @suffix: `gchararray`, suffix for tiles
+ *     * @overlap: `gint`, set tile overlap
+ *     * @tile_size: `gint`, set tile size
+ *     * @background: [struct@ArrayDouble], background colour
+ *     * @depth: [enum@ForeignDzDepth], how deep to make the pyramid
+ *     * @centre: `gboolean`, centre the tiles
+ *     * @angle: [enum@Angle], rotate the image by this much
+ *     * @container: [enum@ForeignDzContainer], set container type
+ *     * @compression: `gint`, zip deflate compression level
+ *     * @region_shrink: [enum@RegionShrink], how to shrink each 2x2 region
+ *     * @skip_blanks: `gint`, skip tiles which are nearly equal to the
+ *       background
+ *     * @id: `gchararray`, id for IIIF properties
+ *     * @Q: `gint`, quality factor
+ *
+ * ::: seealso
+ *     [method@Image.tiffsave].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -2783,36 +2886,37 @@ vips_dzsave(VipsImage *in, const char *name, ...)
  * @in: image to save
  * @buf: (array length=len) (element-type guint8): return output buffer here
  * @len: (type gsize): return output length here
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
- *
- * * @basename: %gchar base part of name
- * * @layout: #VipsForeignDzLayout directory layout convention
- * * @suffix: %gchar suffix for tiles
- * * @overlap: %gint set tile overlap
- * * @tile_size: %gint set tile size
- * * @background: #VipsArrayDouble background colour
- * * @depth: #VipsForeignDzDepth how deep to make the pyramid
- * * @centre: %gboolean centre the tiles
- * * @angle: #VipsAngle rotate the image by this much
- * * @container: #VipsForeignDzContainer set container type
- * * @compression: %gint zip deflate compression level
- * * @region_shrink: #VipsRegionShrink how to shrink each 2x2 region.
- * * @skip_blanks: %gint skip tiles which are nearly equal to the background
- * * @id: %gchar id for IIIF properties
- * * @Q: %gint, quality factor
- *
- * As vips_dzsave(), but save to a memory buffer.
+ * As [method@Image.dzsave], but save to a memory buffer.
  *
  * Output is always in a zip container. Use @basename to set the name of the
  * directory that the zip will create when unzipped.
  *
  * The address of the buffer is returned in @buf, the length of the buffer in
- * @len. You are responsible for freeing the buffer with g_free() when you
+ * @len. You are responsible for freeing the buffer with [func@GLib.free] when you
  * are done with it.
  *
- * See also: vips_dzsave(), vips_image_write_to_file().
+ * ::: tip "Optional arguments"
+ *     * @basename: `gchararray`, base part of name
+ *     * @layout: [enum@ForeignDzLayout], directory layout convention
+ *     * @suffix: `gchararray`, suffix for tiles
+ *     * @overlap: `gint`, set tile overlap
+ *     * @tile_size: `gint`, set tile size
+ *     * @background: [struct@ArrayDouble], background colour
+ *     * @depth: [enum@ForeignDzDepth], how deep to make the pyramid
+ *     * @centre: `gboolean`, centre the tiles
+ *     * @angle: [enum@Angle], rotate the image by this much
+ *     * @container: [enum@ForeignDzContainer], set container type
+ *     * @compression: `gint`, zip deflate compression level
+ *     * @region_shrink: [enum@RegionShrink], how to shrink each 2x2 region
+ *     * @skip_blanks: `gint`, skip tiles which are nearly equal to the
+ *       background
+ *     * @id: `gchararray`, id for IIIF properties
+ *     * @Q: `gint`, quality factor
+ *
+ * ::: seealso
+ *     [method@Image.dzsave], [method@Image.write_to_file].
  *
  * Returns: 0 on success, -1 on error.
  */
@@ -2848,29 +2952,30 @@ vips_dzsave_buffer(VipsImage *in, void **buf, size_t *len, ...)
  * vips_dzsave_target: (method)
  * @in: image to save
  * @target: save image to this target
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
- * Optional arguments:
+ * As [method@Image.dzsave], but save to a target.
  *
- * * @basename: %gchar base part of name
- * * @layout: #VipsForeignDzLayout directory layout convention
- * * @suffix: %gchar suffix for tiles
- * * @overlap: %gint set tile overlap
- * * @tile_size: %gint set tile size
- * * @background: #VipsArrayDouble background colour
- * * @depth: #VipsForeignDzDepth how deep to make the pyramid
- * * @centre: %gboolean centre the tiles
- * * @angle: #VipsAngle rotate the image by this much
- * * @container: #VipsForeignDzContainer set container type
- * * @compression: %gint zip deflate compression level
- * * @region_shrink: #VipsRegionShrink how to shrink each 2x2 region.
- * * @skip_blanks: %gint skip tiles which are nearly equal to the background
- * * @id: %gchar id for IIIF properties
- * * @Q: %gint, quality factor
+ * ::: tip "Optional arguments"
+ *     * @basename: `gchararray`, base part of name
+ *     * @layout: [enum@ForeignDzLayout], directory layout convention
+ *     * @suffix: `gchararray`, suffix for tiles
+ *     * @overlap: `gint`, set tile overlap
+ *     * @tile_size: `gint`, set tile size
+ *     * @background: [struct@ArrayDouble], background colour
+ *     * @depth: [enum@ForeignDzDepth], how deep to make the pyramid
+ *     * @centre: `gboolean`, centre the tiles
+ *     * @angle: [enum@Angle], rotate the image by this much
+ *     * @container: [enum@ForeignDzContainer], set container type
+ *     * @compression: `gint`, zip deflate compression level
+ *     * @region_shrink: [enum@RegionShrink], how to shrink each 2x2 region
+ *     * @skip_blanks: `gint`, skip tiles which are nearly equal to the
+ *       background
+ *     * @id: `gchararray`, id for IIIF properties
+ *     * @Q: `gint`, quality factor
  *
- * As vips_dzsave(), but save to a target.
- *
- * See also: vips_dzsave(), vips_image_write_to_target().
+ * ::: seealso
+ *     [method@Image.dzsave], [method@Image.write_to_target].
  *
  * Returns: 0 on success, -1 on error.
  */

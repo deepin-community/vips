@@ -48,6 +48,7 @@
 #include <glib/gi18n-lib.h>
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -148,10 +149,10 @@ vips_bandmean_buffer(VipsBandarySequence *seq,
 		UILOOP(unsigned short, unsigned int);
 		break;
 	case VIPS_FORMAT_INT:
-		SILOOP(signed int, int);
+		SILOOP(signed int, int64_t);
 		break;
 	case VIPS_FORMAT_UINT:
-		UILOOP(unsigned int, unsigned int);
+		UILOOP(unsigned int, uint64_t);
 		break;
 	case VIPS_FORMAT_FLOAT:
 		FLOOP(float);
@@ -224,14 +225,15 @@ vips_bandmean_init(VipsBandmean *bandmean)
  * vips_bandmean: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * This operation writes a one-band image where each pixel is the average of
  * the bands for that pixel in the input image. The output band format is
  * the same as the input band format. Integer types use round-to-nearest
  * averaging.
  *
- * See also: vips_add(), vips_avg(), vips_recomb()
+ * ::: seealso
+ *     [method@Image.add], [method@Image.avg], [method@Image.recomb]
  *
  * Returns: 0 on success, -1 on error
  */

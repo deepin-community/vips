@@ -262,9 +262,21 @@ vips_hist_plot_build(VipsObject *object)
 		min = *VIPS_MATRIX(t[0], 0, 0);
 		max = *VIPS_MATRIX(t[0], 1, 0);
 
-		if (vips_linear1(in, &t[1],
-				any / (max - min), -min * any / (max - min), NULL))
-			return -1;
+		/* For float-style images, we need to check for near zero range,
+		 * or we'll get +/- Inf in vips_max() below.
+		 */
+		if (fabs(max - min) > 0.01) {
+			if (vips_linear1(in, &t[1],
+					any / (max - min), -min * any / (max - min), NULL))
+				return -1;
+		}
+		else
+			/* Range effectively zero: just return black.
+			 */
+			if (vips_black(&t[1], in->Xsize, in->Ysize,
+					"bands", in->Bands,
+					NULL))
+				return -1;
 
 		in = t[1];
 	}
@@ -280,7 +292,7 @@ vips_hist_plot_build(VipsObject *object)
 	if (in->BandFmt == VIPS_FORMAT_UCHAR)
 		tsize = 256;
 	else
-		tsize = VIPS_CEIL(max);
+		tsize = ceil(max);
 
 	/* Make sure we don't make a zero height image.
 	 */
@@ -351,19 +363,19 @@ vips_hist_plot_init(VipsHistPlot *hist_plot)
  * vips_hist_plot: (method)
  * @in: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Plot a 1 by any or any by 1 image file as a max by any or
  * any by max image using these rules:
  *
- * <emphasis>unsigned char</emphasis> max is always 256
+ * *unsigned char* max is always 256
  *
- * <emphasis>other unsigned integer types</emphasis> output 0 - maximum
+ * *other unsigned integer types* output 0 - maximum
  * value of @in.
  *
- * <emphasis>signed int types</emphasis> min moved to 0, max moved to max + min.
+ * *signed int types* min moved to 0, max moved to max + min.
  *
- * <emphasis>float types</emphasis> min moved to 0, max moved to any
+ * *float types* min moved to 0, max moved to any
  * (square output)
  *
  * Returns: 0 on success, -1 on error

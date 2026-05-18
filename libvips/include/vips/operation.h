@@ -44,7 +44,8 @@ extern "C" {
 typedef enum /*< flags >*/ {
 	VIPS_OPERATION_NONE = 0,
 	VIPS_OPERATION_SEQUENTIAL = 1,
-	VIPS_OPERATION_SEQUENTIAL_UNBUFFERED = 2,
+	VIPS_OPERATION_SEQUENTIAL_UNBUFFERED
+		VIPS_DEPRECATED_ENUMERATOR_FOR(VIPS_OPERATION_SEQUENTIAL) = 2,
 	VIPS_OPERATION_NOCACHE = 4,
 	VIPS_OPERATION_DEPRECATED = 8,
 	VIPS_OPERATION_UNTRUSTED = 16,
@@ -100,8 +101,6 @@ typedef struct _VipsOperationClass {
 	void (*invalidate)(VipsOperation *operation);
 } VipsOperationClass;
 
-/* Don't put spaces around void here, it breaks gtk-doc.
- */
 VIPS_API
 GType vips_operation_get_type(void);
 

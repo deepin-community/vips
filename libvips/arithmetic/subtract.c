@@ -70,6 +70,7 @@
 #include <glib/gi18n-lib.h>
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -90,6 +91,18 @@ G_DEFINE_TYPE(VipsSubtract, vips_subtract, VIPS_TYPE_BINARY);
 \
 		for (x = 0; x < sz; x++) \
 			q[x] = left[x] - right[x]; \
+	}
+
+/* Special case for VIPS_FORMAT_INT, to prevent UB.
+ */
+#define LOOP_INT64(IN, OUT) \
+	{ \
+		IN *restrict left = (IN *) in[0]; \
+		IN *restrict right = (IN *) in[1]; \
+		OUT *restrict q = (OUT *) out; \
+\
+		for (x = 0; x < sz; x++) \
+			q[x] = (int64_t) left[x] - right[x]; \
 	}
 
 static void
@@ -122,7 +135,7 @@ vips_subtract_buffer(VipsArithmetic *arithmetic,
 		LOOP(unsigned short, signed int);
 		break;
 	case VIPS_FORMAT_INT:
-		LOOP(signed int, signed int);
+		LOOP_INT64(signed int, signed int);
 		break;
 	case VIPS_FORMAT_UINT:
 		LOOP(unsigned int, signed int);
@@ -184,11 +197,11 @@ vips_subtract_init(VipsSubtract *subtract)
 }
 
 /**
- * vips_subtract:
+ * vips_subtract: (method)
  * @in1: input image
  * @in2: input image
  * @out: (out): output image
- * @...: %NULL-terminated list of optional named arguments
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * This operation calculates @in1 - @in2 and writes the result to @out.
  *
@@ -202,67 +215,29 @@ vips_subtract_init(VipsSubtract *subtract)
  *
  * The two input images are cast up to the smallest common format (see table
  * Smallest common format in
- * <link linkend="libvips-arithmetic">arithmetic</link>), then the
+ * [arithmetic](libvips-arithmetic.html)), then the
  * following table is used to determine the output type:
  *
- * <table>
- *   <title>VipsSubtract type promotion</title>
- *   <tgroup cols='2' align='left' colsep='1' rowsep='1'>
- *     <thead>
- *       <row>
- *         <entry>input type</entry>
- *         <entry>output type</entry>
- *       </row>
- *     </thead>
- *     <tbody>
- *       <row>
- *         <entry>uchar</entry>
- *         <entry>short</entry>
- *       </row>
- *       <row>
- *         <entry>char</entry>
- *         <entry>short</entry>
- *       </row>
- *       <row>
- *         <entry>ushort</entry>
- *         <entry>int</entry>
- *       </row>
- *       <row>
- *         <entry>short</entry>
- *         <entry>int</entry>
- *       </row>
- *       <row>
- *         <entry>uint</entry>
- *         <entry>int</entry>
- *       </row>
- *       <row>
- *         <entry>int</entry>
- *         <entry>int</entry>
- *       </row>
- *       <row>
- *         <entry>float</entry>
- *         <entry>float</entry>
- *       </row>
- *       <row>
- *         <entry>double</entry>
- *         <entry>double</entry>
- *       </row>
- *       <row>
- *         <entry>complex</entry>
- *         <entry>complex</entry>
- *       </row>
- *       <row>
- *         <entry>double complex</entry>
- *         <entry>double complex</entry>
- *       </row>
- *     </tbody>
- *   </tgroup>
- * </table>
+ * ## [method@Image.subtract] type promotion
+ *
+ * | input type     | output type    |
+ * |----------------|----------------|
+ * | uchar          | short          |
+ * | char           | short          |
+ * | ushort         | int            |
+ * | short          | int            |
+ * | uint           | int            |
+ * | int            | int            |
+ * | float          | float          |
+ * | double         | double         |
+ * | complex        | complex        |
+ * | double complex | double complex |
  *
  * In other words, the output type is just large enough to hold the whole
  * range of possible values.
  *
- * See also: vips_add(), vips_linear().
+ * ::: seealso
+ *     [method@Image.add], [method@Image.linear].
  *
  * Returns: 0 on success, -1 on error
  */

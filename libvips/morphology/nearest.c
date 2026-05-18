@@ -116,7 +116,7 @@ vips_fill_nearest_pixel(Circle *circle, int x, int y, int octant)
 	p = (float *) VIPS_IMAGE_ADDR(circle->nearest->distance, x, y);
 	dx = x - circle->seed->x;
 	dy = y - circle->seed->y;
-	radius = sqrt(dx * dx + dy * dy);
+	radius = sqrtf(dx * dx + dy * dy);
 
 	if (p[0] == 0 ||
 		p[0] > radius) {
@@ -327,11 +327,7 @@ vips_fill_nearest_init(VipsFillNearest *nearest)
  * vips_fill_nearest: (method)
  * @in: image to test
  * @out: image with zero pixels filled with the nearest non-zero pixel
- * @...: %NULL-terminated list of optional named arguments
- *
- * Optional arguments:
- *
- * * @distance: output image of distance to nearest non-zero pixel
+ * @...: `NULL`-terminated list of optional named arguments
  *
  * Fill outwards from every non-zero pixel in @in, setting pixels in @distance
  * and @value.
@@ -343,7 +339,12 @@ vips_fill_nearest_init(VipsFillNearest *nearest)
  * @distance is a one-band float image. @value has the same number of bands and
  * format as @in.
  *
- * See also: vips_hist_find_indexed().
+ * ::: tip "Optional arguments"
+ *     * @distance: [class@Image], output, image of distance to nearest
+ *       non-zero pixel
+ *
+ * ::: seealso
+ *     [method@Image.hist_find_indexed].
  *
  * Returns: 0 on success, -1 on error.
  */

@@ -10,6 +10,7 @@ foreign_sources = files(
     'cgifsave.c',
     'csvload.c',
     'csvsave.c',
+    'dcrawload.c',
     'dzsave.c',
     'exif.c',
     'fits.c',
@@ -51,6 +52,8 @@ foreign_sources = files(
     'tiff.c',
     'tiffload.c',
     'tiffsave.c',
+    'uhdrload.c',
+    'uhdrsave.c',
     'vips2jpeg.c',
     'vips2tiff.c',
     'vipsload.c',
@@ -73,7 +76,6 @@ foreign_headers = files(
 # if it is not built as a dynamically loadable module.
 magick_module_sources = files(
     'magick.c',
-    'magick2vips.c',
     'magick6load.c',
     'magick7load.c',
     'vips2magick.c',
@@ -117,6 +119,7 @@ endif
 
 openslide_module_sources = files(
     'openslideload.c',
+    'openslideconnection.c',
 )
 
 if not openslide_module

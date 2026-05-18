@@ -110,6 +110,7 @@ EOF
 #include <fpdf_doc.h>
 #include <fpdf_edit.h>
 #include <fpdf_formfill.h>
+#include <fpdf_transformpage.h>
 
 #define TILE_SIZE (4000)
 
@@ -132,9 +133,13 @@ typedef struct _VipsForeignLoadPdf {
 	 */
 	double dpi;
 
-	/* Calculate this from DPI. At 72 DPI, we render 1:1.
+	/* Scale by this factor.
 	 */
 	double scale;
+
+	/* The total scale factor we render with.
+	 */
+	double total_scale;
 
 	/* Background colour.
 	 */
@@ -165,6 +170,10 @@ typedef struct _VipsForeignLoadPdf {
 	 */
 	VipsPel *ink;
 
+	/* Render this page box.
+	 */
+	VipsForeignPdfPageBox page_box;
+
 } VipsForeignLoadPdf;
 
 typedef VipsForeignLoadClass VipsForeignLoadPdfClass;
@@ -182,7 +191,7 @@ static char *vips_pdfium_errors[] = {
 	"page not found or content error"
 };
 
-static GMutex *vips_pdfium_mutex = NULL;
+static GMutex vips_pdfium_mutex;
 
 static void
 vips_pdfium_error(void)
@@ -199,14 +208,14 @@ vips_pdfium_error(void)
 static void
 vips_foreign_load_pdf_close(VipsForeignLoadPdf *pdf)
 {
-	g_mutex_lock(vips_pdfium_mutex);
+	g_mutex_lock(&vips_pdfium_mutex);
 
 	VIPS_FREEF(FPDF_ClosePage, pdf->page);
 	VIPS_FREEF(FPDFDOC_ExitFormFillEnvironment, pdf->form);
 	VIPS_FREEF(FPDF_CloseDocument, pdf->doc);
 	VIPS_UNREF(pdf->source);
 
-	g_mutex_unlock(vips_pdfium_mutex);
+	g_mutex_unlock(&vips_pdfium_mutex);
 }
 
 static void
@@ -276,8 +285,7 @@ vips_foreign_load_pdf_build(VipsObject *object)
 
 	VIPS_ONCE(&once, vips_pdfium_init_cb, NULL);
 
-	if (!vips_object_argument_isset(object, "scale"))
-		pdf->scale = pdf->dpi / 72.0;
+	pdf->total_scale = pdf->scale * pdf->dpi / 72.0;
 
 	pdf->form_callbacks.version = 2;
 
@@ -297,11 +305,11 @@ vips_foreign_load_pdf_build(VipsObject *object)
 		pdf->file_access.m_GetBlock = vips_pdfium_GetBlock;
 		pdf->file_access.m_Param = pdf;
 
-		g_mutex_lock(vips_pdfium_mutex);
+		g_mutex_lock(&vips_pdfium_mutex);
 
 		if (!(pdf->doc = FPDF_LoadCustomDocument(&pdf->file_access,
 				  pdf->password))) {
-			g_mutex_unlock(vips_pdfium_mutex);
+			g_mutex_unlock(&vips_pdfium_mutex);
 			vips_pdfium_error();
 			vips_error("pdfload",
 				_("%s: unable to load"),
@@ -312,7 +320,7 @@ vips_foreign_load_pdf_build(VipsObject *object)
 
 		if (!(pdf->form = FPDFDOC_InitFormFillEnvironment(pdf->doc,
 				  &pdf->form_callbacks))) {
-			g_mutex_unlock(vips_pdfium_mutex);
+			g_mutex_unlock(&vips_pdfium_mutex);
 			vips_pdfium_error();
 			vips_error("pdfload",
 				_("%s: unable to initialize form fill environment"),
@@ -321,13 +329,11 @@ vips_foreign_load_pdf_build(VipsObject *object)
 			return -1;
 		}
 
-		g_mutex_unlock(vips_pdfium_mutex);
+		g_mutex_unlock(&vips_pdfium_mutex);
 	}
 
-	if (VIPS_OBJECT_CLASS(vips_foreign_load_pdf_parent_class)->build(object))
-		return -1;
-
-	return 0;
+	return VIPS_OBJECT_CLASS(vips_foreign_load_pdf_parent_class)
+		->build(object);
 }
 
 static VipsForeignFlags
@@ -350,7 +356,7 @@ vips_foreign_load_pdf_get_page(VipsForeignLoadPdf *pdf, int page_no)
 	if (pdf->current_page != page_no) {
 		VipsObjectClass *class = VIPS_OBJECT_GET_CLASS(pdf);
 
-		g_mutex_lock(vips_pdfium_mutex);
+		g_mutex_lock(&vips_pdfium_mutex);
 
 		VIPS_FREEF(FPDF_ClosePage, pdf->page);
 		pdf->current_page = -1;
@@ -360,7 +366,7 @@ vips_foreign_load_pdf_get_page(VipsForeignLoadPdf *pdf, int page_no)
 #endif /*DEBUG*/
 
 		if (!(pdf->page = FPDF_LoadPage(pdf->doc, page_no))) {
-			g_mutex_unlock(vips_pdfium_mutex);
+			g_mutex_unlock(&vips_pdfium_mutex);
 			vips_pdfium_error();
 			vips_error(class->nickname,
 				_("unable to load page %d"), page_no);
@@ -368,7 +374,7 @@ vips_foreign_load_pdf_get_page(VipsForeignLoadPdf *pdf, int page_no)
 		}
 		pdf->current_page = page_no;
 
-		g_mutex_unlock(vips_pdfium_mutex);
+		g_mutex_unlock(&vips_pdfium_mutex);
 	}
 
 	return 0;
@@ -412,7 +418,7 @@ vips_foreign_load_pdf_set_image(VipsForeignLoadPdf *pdf, VipsImage *out)
 	vips_image_set_int(out, "pdf-n_pages", pdf->n_pages);
 	vips_image_set_int(out, VIPS_META_N_PAGES, pdf->n_pages);
 
-	g_mutex_lock(vips_pdfium_mutex);
+	g_mutex_lock(&vips_pdfium_mutex);
 
 	for (i = 0; i < n_metadata; i++) {
 		VipsForeignLoadPdfMetadata *metadata =
@@ -436,7 +442,7 @@ vips_foreign_load_pdf_set_image(VipsForeignLoadPdf *pdf, VipsImage *out)
 		}
 	}
 
-	g_mutex_unlock(vips_pdfium_mutex);
+	g_mutex_unlock(&vips_pdfium_mutex);
 
 	/* We need pixels/mm for vips.
 	 */
@@ -450,6 +456,49 @@ vips_foreign_load_pdf_set_image(VipsForeignLoadPdf *pdf, VipsImage *out)
 	return 0;
 }
 
+static void
+vips_foreign_load_pdf_apply_page_box(FPDF_PAGE page, VipsForeignPdfPageBox box)
+{
+	float left, bottom, right, top;
+
+	/* Avoid locking when no change in region to render.
+	 */
+	if (box == VIPS_FOREIGN_PDF_PAGE_BOX_CROP)
+		return;
+
+	g_mutex_lock(&vips_pdfium_mutex);
+	switch (box) {
+	case VIPS_FOREIGN_PDF_PAGE_BOX_MEDIA:
+		if (FPDFPage_GetMediaBox(page, &left, &bottom, &right, &top))
+			FPDFPage_SetCropBox(page, left, bottom, right, top);
+		else
+			g_warning("missing media box, using default crop box");
+		break;
+	case VIPS_FOREIGN_PDF_PAGE_BOX_TRIM:
+		if (FPDFPage_GetTrimBox(page, &left, &bottom, &right, &top))
+			FPDFPage_SetCropBox(page, left, bottom, right, top);
+		else
+			g_warning("missing trim box, using default crop box");
+		break;
+	case VIPS_FOREIGN_PDF_PAGE_BOX_BLEED:
+		if (FPDFPage_GetBleedBox(page, &left, &bottom, &right, &top))
+			FPDFPage_SetCropBox(page, left, bottom, right, top);
+		else
+			g_warning("missing bleed box, using default crop box");
+		break;
+	case VIPS_FOREIGN_PDF_PAGE_BOX_ART:
+		if (FPDFPage_GetArtBox(page, &left, &bottom, &right, &top))
+			FPDFPage_SetCropBox(page, left, bottom, right, top);
+		else
+			g_warning("missing art box, using default crop box");
+		break;
+	case VIPS_FOREIGN_PDF_PAGE_BOX_CROP:
+	default:
+		break;
+	}
+	g_mutex_unlock(&vips_pdfium_mutex);
+}
+
 static int
 vips_foreign_load_pdf_header(VipsForeignLoad *load)
 {
@@ -457,20 +506,19 @@ vips_foreign_load_pdf_header(VipsForeignLoad *load)
 	VipsForeignLoadPdf *pdf = (VipsForeignLoadPdf *) load;
 
 	int top;
-	int i;
 
 #ifdef DEBUG
 	printf("vips_foreign_load_pdf_header: %p\n", pdf);
 #endif /*DEBUG*/
 
-	g_mutex_lock(vips_pdfium_mutex);
+	g_mutex_lock(&vips_pdfium_mutex);
 	pdf->n_pages = FPDF_GetPageCount(pdf->doc);
-	g_mutex_unlock(vips_pdfium_mutex);
+	g_mutex_unlock(&vips_pdfium_mutex);
 
 	/* @n == -1 means until the end of the doc.
 	 */
 	if (pdf->n == -1)
-		pdf->n = pdf->n_pages - pdf->page_no;
+		pdf->n = pdf->n_pages - pdf->page_no; // FIXME: Invalidates operation cache
 
 	if (pdf->page_no + pdf->n > pdf->n_pages ||
 		pdf->page_no < 0 ||
@@ -489,19 +537,25 @@ vips_foreign_load_pdf_header(VipsForeignLoad *load)
 	pdf->image.top = 0;
 	pdf->image.width = 0;
 	pdf->image.height = 0;
-	for (i = 0; i < pdf->n; i++) {
+	for (int i = 0; i < pdf->n; i++) {
 		if (vips_foreign_load_pdf_get_page(pdf, pdf->page_no + i))
 			return -1;
 		pdf->pages[i].left = 0;
 		pdf->pages[i].top = top;
+
+		/* Attempt to apply selected page box using the page coordinate
+		 * system (bottom left) before calculating render dimensions
+		 * using the client coordinate system (top left). */
+		vips_foreign_load_pdf_apply_page_box(pdf->page, pdf->page_box);
+
 		/* We do round to nearest, in the same way that vips_resize()
 		 * does round to nearest. Without this, things like
 		 * shrink-on-load will break.
 		 */
-		pdf->pages[i].width = VIPS_RINT(
-			FPDF_GetPageWidth(pdf->page) * pdf->scale);
-		pdf->pages[i].height = VIPS_RINT(
-			FPDF_GetPageHeight(pdf->page) * pdf->scale);
+		pdf->pages[i].width = rint(
+			FPDF_GetPageWidth(pdf->page) * pdf->total_scale);
+		pdf->pages[i].height = rint(
+			FPDF_GetPageHeight(pdf->page) * pdf->total_scale);
 
 		/* PDFium allows page width or height to be less than 1 (!!).
 		 */
@@ -524,7 +578,7 @@ vips_foreign_load_pdf_header(VipsForeignLoad *load)
 	/* If all pages are the same height, we can tag this as a toilet roll
 	 * image.
 	 */
-	for (i = 1; i < pdf->n; i++)
+	for (int i = 1; i < pdf->n; i++)
 		if (pdf->pages[i].height != pdf->pages[0].height)
 			break;
 
@@ -586,47 +640,53 @@ vips_foreign_load_pdf_generate(VipsRegion *out_region,
 
 	top = r->top;
 	while (top < VIPS_RECT_BOTTOM(r)) {
-		VipsRect rect;
 		FPDF_BITMAP bitmap;
 
+		/* Is the rect within this page? It might not be if the output is more
+		 * than one tile wide and this page is narrower.
+		 */
+		VipsRect rect;
 		vips_rect_intersectrect(r, &pdf->pages[i], &rect);
+		if (rect.width > 0 &&
+			rect.height > 0) {
 
-		if (vips_foreign_load_pdf_get_page(pdf, pdf->page_no + i))
-			return -1;
+			if (vips_foreign_load_pdf_get_page(pdf, pdf->page_no + i))
+				return -1;
 
-		vips__worker_lock(vips_pdfium_mutex);
+			vips__worker_lock(&vips_pdfium_mutex);
 
-		/* 4 means RGBA.
-		 */
-		bitmap = FPDFBitmap_CreateEx(rect.width, rect.height, 4,
-			VIPS_REGION_ADDR(out_region, rect.left, rect.top),
-			VIPS_REGION_LSKIP(out_region));
+			/* 4 means RGBA.
+			 */
+			bitmap = FPDFBitmap_CreateEx(rect.width, rect.height, 4,
+				VIPS_REGION_ADDR(out_region, rect.left, rect.top),
+				VIPS_REGION_LSKIP(out_region));
 
-		/* Only paint the background if there's no transparency.
-		 */
-		if (!FPDFPage_HasTransparency(pdf->page)) {
-			FPDF_DWORD ink = *((guint32 *) pdf->ink);
+			/* Only paint the background if there's no transparency.
+			 */
+			if (!FPDFPage_HasTransparency(pdf->page)) {
+				FPDF_DWORD ink = *((guint32 *) pdf->ink);
 
-			FPDFBitmap_FillRect(bitmap,
-				0, 0, rect.width, rect.height, ink);
+				FPDFBitmap_FillRect(bitmap,
+					0, 0, rect.width, rect.height, ink);
+			}
+
+			// pdfium writes bgra by default, we need rgba
+			FPDF_RenderPageBitmap(bitmap, pdf->page,
+				pdf->pages[i].left - rect.left,
+				pdf->pages[i].top - rect.top,
+				pdf->pages[i].width, pdf->pages[i].height,
+				0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+
+			FPDF_FFLDraw(pdf->form, bitmap, pdf->page,
+				pdf->pages[i].left - rect.left,
+				pdf->pages[i].top - rect.top,
+				pdf->pages[i].width, pdf->pages[i].height,
+				0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+
+			FPDFBitmap_Destroy(bitmap);
+
+			g_mutex_unlock(&vips_pdfium_mutex);
 		}
-
-		// pdfium writes bgra by default, we need rgba
-		FPDF_RenderPageBitmap(bitmap, pdf->page,
-			pdf->pages[i].left - rect.left,
-			pdf->pages[i].top - rect.top,
-			pdf->pages[i].width, pdf->pages[i].height,
-			0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
-
-		FPDF_FFLDraw(pdf->form, bitmap, pdf->page,
-			pdf->pages[i].left - rect.left,
-			pdf->pages[i].top - rect.top,
-			pdf->pages[i].width, pdf->pages[i].height,
-			0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
-
-		FPDFBitmap_Destroy(bitmap);
-
-		g_mutex_unlock(vips_pdfium_mutex);
 
 		top += rect.height;
 		i += 1;
@@ -670,27 +730,12 @@ vips_foreign_load_pdf_load(VipsForeignLoad *load)
 	return 0;
 }
 
-static void *
-vips_foreign_load_pdf_once_init(void *client)
-{
-	/* We must make the mutex on class init (not _build) since we
-	 * can lock even if build is not called.
-	 */
-	vips_pdfium_mutex = vips_g_mutex_new();
-
-	return NULL;
-}
-
 static void
 vips_foreign_load_pdf_class_init(VipsForeignLoadPdfClass *class)
 {
-	static GOnce once = G_ONCE_INIT;
-
 	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
 	VipsObjectClass *object_class = (VipsObjectClass *) class;
 	VipsForeignLoadClass *load_class = (VipsForeignLoadClass *) class;
-
-	VIPS_ONCE(&once, vips_foreign_load_pdf_once_init, NULL);
 
 	gobject_class->dispose = vips_foreign_load_pdf_dispose;
 	gobject_class->set_property = vips_object_set_property;
@@ -747,6 +792,14 @@ vips_foreign_load_pdf_class_init(VipsForeignLoadPdfClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignLoadPdf, password),
 		NULL);
+
+	VIPS_ARG_ENUM(class, "page_box", 26,
+		_("Page box"),
+		_("The region of the page to render"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignLoadPdf, page_box),
+		VIPS_TYPE_FOREIGN_PDF_PAGE_BOX,
+		VIPS_FOREIGN_PDF_PAGE_BOX_CROP);
 }
 
 static void
@@ -757,6 +810,7 @@ vips_foreign_load_pdf_init(VipsForeignLoadPdf *pdf)
 	pdf->n = 1;
 	pdf->current_page = -1;
 	pdf->background = vips_array_double_newv(1, 255.0);
+	pdf->page_box = VIPS_FOREIGN_PDF_PAGE_BOX_CROP;
 }
 
 typedef struct _VipsForeignLoadPdfFile {
@@ -815,7 +869,7 @@ vips_foreign_load_pdf_file_class_init(
 	gobject_class->get_property = vips_object_get_property;
 
 	object_class->nickname = "pdfload";
-	object_class->description = _("load PDF from file");
+	object_class->description = _("load PDF from file (pdfium)");
 	object_class->build = vips_foreign_load_pdf_file_build;
 
 	foreign_class->suffs = vips__pdf_suffs;
@@ -878,7 +932,7 @@ vips_foreign_load_pdf_buffer_class_init(
 	gobject_class->get_property = vips_object_get_property;
 
 	object_class->nickname = "pdfload_buffer";
-	object_class->description = _("load PDF from buffer");
+	object_class->description = _("load PDF from buffer (pdfium)");
 	object_class->build = vips_foreign_load_pdf_buffer_build;
 
 	load_class->is_a_buffer = vips__pdf_is_a_buffer;
@@ -936,7 +990,7 @@ vips_foreign_load_pdf_source_class_init(
 	gobject_class->get_property = vips_object_get_property;
 
 	object_class->nickname = "pdfload_source";
-	object_class->description = _("load PDF from source");
+	object_class->description = _("load PDF from source (pdfium)");
 	object_class->build = vips_foreign_load_pdf_source_build;
 
 	operation_class->flags |= VIPS_OPERATION_NOCACHE;
