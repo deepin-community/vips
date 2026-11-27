@@ -1,14 +1,36 @@
-vips (8.16.1-1deepin2) unstable; urgency=medium
+vips (8.16.1-1+deb13u2deepin1) unstable; urgency=medium
 
-  * Rebuild against imagemagick 7.
+  * revert t64
 
- -- Tianyu Chen <sweetyfish@deepin.org>  Thu, 04 Sep 2025 23:05:16 +0800
+ -- Tianyu Chen <sweetyfish@deepin.org>  Fri, 27 Nov 2026 15:01:29 +0800
 
-vips (8.16.1-1deepin1) unstable; urgency=medium
+vips (8.16.1-1+deb13u2) trixie-security; urgency=high
 
-  * revert t64.
+  * Non-maintainer upload by the Debian Security Team.
+  * Fix vulnerabilities:
+    - CVE-2025-59933: validate image dimensions returned by the PDF and SVG loaders.
+    - CVE-2026-33327: prevent integer overflow when allocating GIF images.
+    - CVE-2026-33328: guard against image dimension overflows.
+    - CVE-2026-35591: validate JPEG and JPEG 2000 components in the TIFF loader.
+    - CVE-2026-35590: validate EXIF IFD indices.
+    - CVE-2026-69242: ensure scanlines fit in INT_MAX.
+    - CVE-2026-70654: fix maximum read size handling in vipsource.
+    - CVE-2026-70653: avoid unsafe processing of legacy Radiance RLE data.
+    - CVE-2026-70651: check the final image height of ImageMagick animations.
 
- -- lhdjply <lhdjply@126.com>  Mon, 28 Jul 2025 08:25:48 +0800
+ -- Tianyu Chen <billchenchina2001@gmail.com>  Wed, 30 Sep 2026 17:20:35 +0800
+
+vips (8.16.1-1+deb13u1) trixie; urgency=medium
+
+  [ Moritz Mühlenhoff <jmm@debian.org> ]
+  * CVE-2026-3283 CVE-2026-3284 (Closes: #1129310)
+  * CVE-2026-3282 (Closes: #1129311)
+  * CVE-2026-3281 (Closes: #1129312)
+  * CVE-2026-3147 (Closes: #1129314)
+  * CVE-2026-3145 CVE-2026-3146 (Closes: #1129315)
+  * CVE-2026-2913 (Closes: #1128785)
+
+ -- Laszlo Boszormenyi (GCS) <gcs@debian.org>  Mon, 06 Apr 2026 14:18:12 +0200
 
 vips (8.16.1-1) unstable; urgency=medium
 

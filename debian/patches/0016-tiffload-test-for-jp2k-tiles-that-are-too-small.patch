@@ -1,0 +1,26 @@
+From: John Cupitt <jcupitt@gmail.com>
+Date: Fri, 4 Sep 2026 13:54:11 +0100
+Subject: tiffload: test for jp2k tiles that are too small
+
+Thanks Ada Logics
+---
+ libvips/foreign/jp2kload.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libvips/foreign/jp2kload.c b/libvips/foreign/jp2kload.c
+index 6a08c5a..2992271 100644
+--- a/libvips/foreign/jp2kload.c
++++ b/libvips/foreign/jp2kload.c
+@@ -1548,9 +1548,9 @@ vips__foreign_load_jp2k_decompress(VipsImage *out,
+ 	if (vips_foreign_load_jp2k_check_supported(decompress.image))
+ 		return -1;
+ 
+-	if (decompress.image->x1 > width ||
+-		decompress.image->y1 > height ||
+-		decompress.image->numcomps > out->Bands ||
++	if (decompress.image->x1 != width ||
++		decompress.image->y1 != height ||
++		decompress.image->numcomps != out->Bands ||
+ 		line_size * height > to_length) {
+ 		vips_error("jp2kload", "%s", ("bad dimensions"));
+ 		vips__foreign_load_jp2k_decompress_free(&decompress);
