@@ -1,3 +1,9 @@
+vips (8.16.1-1+deb13u2deepin1) unstable; urgency=medium
+
+  * revert t64
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Fri, 27 Nov 2026 15:01:29 +0800
+
 vips (8.16.1-1+deb13u2) trixie-security; urgency=high
 
   * Non-maintainer upload by the Debian Security Team.
